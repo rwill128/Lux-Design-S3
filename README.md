@@ -25,7 +25,7 @@ luxai-s3 --help
 ```
 
 ```bash
-luxai-s3 /home/rick/IdeaProjects/Lux-Design-S3/agents/baseline_agent/main.py /home/rick/IdeaProjects/Lux-Design-S3/agents/energy_conserver_agent/main.py --tournament --output replays/replay.json
+luxai-s3 agents --tournament --output replays/run_3/replay.json --replay.no-compressed-obs --tournament-cfg-max-episodes 10
 ```
 
 Then upload the replay.json to the online visualizer here: https://s3vis.lux-ai.org/ (a link on the lux-ai.org website will be up soon) 
@@ -40,7 +40,7 @@ To benchmark your throughput speeds, you can run
 
 ```
 pip install pynvml psutil
-python Lux-Design-S3/src/tests/benchmark_env.py -n 16384 -t 5 # 16384 envs, 5 trials each test
+python src/tests/benchmark_env.py -n 16384 -t 5 # 16384 envs, 5 trials each test
 ```
 
 ### Starter Kits
