@@ -25,7 +25,7 @@ luxai-s3 --help
 ```
 
 ```bash
-luxai-s3 path/to/bot/main.py path/to/bot/main.py --output replay.json
+luxai-s3 /home/rick/IdeaProjects/Lux-Design-S3/agents/baseline_agent/main.py /home/rick/IdeaProjects/Lux-Design-S3/agents/energy_conserver_agent/main.py --tournament --output replays/replay.json
 ```
 
 Then upload the replay.json to the online visualizer here: https://s3vis.lux-ai.org/ (a link on the lux-ai.org website will be up soon) 
