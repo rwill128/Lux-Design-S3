@@ -3,7 +3,7 @@
 # !pip install scipy
 from scipy.optimize import linear_sum_assignment
 
-class Agent:
+class EnergyAgent:
     def __init__(self, player: str, env_cfg) -> None:
         self.player = player
         self.opp_player = "player_1" if self.player == "player_0" else "player_0"
