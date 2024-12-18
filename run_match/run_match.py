@@ -34,145 +34,125 @@ def direction_to(from_pos, to_pos):
 class RelicHuntingShootingAgent:
     def __init__(self, player: str, env_cfg) -> None:
         self.player = player
-        self.opp_player = "player_1" if self.player == "player_0" else "player_0"
-        self.team_id = 0 if self.player == "player_0" else 1
-        self.opp_team_id = 1 if self.team_id == 0 else 0
+        self.team_id = 0 if player == "player_0" else 1
+        self.opp_team_id = 1 - self.team_id
         np.random.seed(0)
         self.env_cfg = env_cfg
 
-        # Attributes for relic logic
         self.last_team_points = 0
         self.last_relic_gain = 0
-        self.relic_allocation = 20
+        self.relic_allocation = 10
         self.current_tester_tile = None
+        self.current_tester_tile_relic = None
+        self.expected_baseline_gain = 0
 
-        self.last_team_points = 0
+        # Stores data across matches (if the agent persists)
         self.relic_tile_data = {}
-        # relic_tile_data[relic_position] = {
-        #    (tile_x, tile_y): {"tested": bool, "reward_tile": bool}
-        # }
-
+        # Format: relic_tile_data[(rx, ry)][(tx, ty)] = {"tested": bool, "reward_tile": bool}
 
     def update_tile_results(self, current_points):
         gain = current_points - self.last_team_points
-
-        # If we had a tester tile assigned last turn:
-        if self.current_tester_tile and self.current_tester_tile_relic:
-            # If gain increased by 1 compared to expected baseline,
-            # we mark this tile as reward_tile = True
+        if self.current_tester_tile is not None and self.current_tester_tile_relic is not None:
+            # Check if new tile yielded a point
             if gain > self.expected_baseline_gain:
                 self.relic_tile_data[self.current_tester_tile_relic][self.current_tester_tile]["reward_tile"] = True
             else:
-                # no additional reward from that tile
                 self.relic_tile_data[self.current_tester_tile_relic][self.current_tester_tile]["reward_tile"] = False
             self.relic_tile_data[self.current_tester_tile_relic][self.current_tester_tile]["tested"] = True
             self.current_tester_tile = None
+            self.current_tester_tile_relic = None
 
     def select_tiles_for_relic(self, relic_pos):
-        # known reward tiles:
         reward_tiles = [t for t, d in self.relic_tile_data[relic_pos].items() if d["reward_tile"]]
-        # unknown tiles:
         untested_tiles = [t for t, d in self.relic_tile_data[relic_pos].items() if not d["tested"]]
-
         return reward_tiles, untested_tiles
 
     def act(self, step: int, obs, remainingOverageTime: int = 60):
-        unit_mask = np.array(obs["units_mask"][self.team_id])  # shape (T, N) but we index with self.team_id
-        unit_positions = np.array(obs["units"]["position"][self.team_id])  # shape (N, 2)
-        unit_energy = np.array(obs["units"]["energy"][self.team_id])  # shape (N,)
-
-        opp_positions = np.array(obs["units"]["position"][self.opp_team_id])  # (N, 2)
-        opp_energy = np.array(obs["units"]["energy"][self.opp_team_id])       # (N,)
-
         actions = np.zeros((self.env_cfg["max_units"], 3), dtype=int)
 
+        unit_mask = np.array(obs["units_mask"][self.team_id])
         available_unit_ids = np.where(unit_mask)[0]
         num_units = len(available_unit_ids)
 
-        current_team_points = obs["team_points"][self.team_id]
+        # If no units, just return
+        if num_units == 0:
+            self.last_team_points = obs["team_points"][self.team_id]
+            return actions
 
-        # Update results from last turn's test
+        current_team_points = obs["team_points"][self.team_id]
+        # Update testing results
         self.update_tile_results(current_team_points)
 
-        # Discover visible relic nodes and initialize their tile data if needed
+        # Setup relic data if we see new relics
         relic_nodes_mask = obs["relic_nodes_mask"]
         relic_nodes_positions = obs["relic_nodes"][relic_nodes_mask]
-
         for (rx, ry) in relic_nodes_positions:
             if (rx, ry) not in self.relic_tile_data:
-                # Initialize the 5x5 area around (rx, ry)
                 self.relic_tile_data[(rx, ry)] = {}
                 for bx in range(rx-2, rx+3):
                     for by in range(ry-2, ry+3):
                         if 0 <= bx < self.env_cfg["map_width"] and 0 <= by < self.env_cfg["map_height"]:
                             self.relic_tile_data[(rx, ry)][(bx, by)] = {"tested": False, "reward_tile": False}
 
-        # Assign units:
-        # 1) Always occupy known reward tiles.
-        # 2) If there are untested tiles and spare units, pick one tile to test this turn.
-
-        actions = np.zeros((self.env_cfg["max_units"], 3), dtype=int)
-        available_unit_ids = np.where(obs["units_mask"][self.team_id])[0]
-
-        # First fill reward tiles:
+        # --- Assign Units to Relic Reward and Test Tiles First ---
+        # This ensures stable baseline for testing
         used_units = set()
+        done_testing_for_this_turn = False
+
         for (rx, ry) in relic_nodes_positions:
             reward_tiles, untested_tiles = self.select_tiles_for_relic((rx, ry))
-            # Place units on reward tiles first
+
+            # Occupy known reward tiles
             for tile in reward_tiles:
                 if len(available_unit_ids) == 0:
                     break
                 u = available_unit_ids[0]
                 available_unit_ids = available_unit_ids[1:]
-                # Move unit u to tile (prefer minimal distance)
+                used_units.add(u)
+
                 ux, uy = obs["units"]["position"][self.team_id][u]
                 tx, ty = tile
                 if (ux, uy) != (tx, ty):
                     direction = direction_to(np.array([ux, uy]), np.array([tx, ty]))
                     actions[u] = [direction, 0, 0]
                 else:
-                    actions[u] = [0,0,0]
-                used_units.add(u)
+                    actions[u] = [0, 0, 0]
 
-            # If we have untested tiles and still have units left, test one tile this turn
-            # but only one tile at a time for clear inference.
-            if untested_tiles and len(available_unit_ids) > 0:
+            # Test one new tile if available and we haven't done testing yet this turn
+            if not done_testing_for_this_turn and untested_tiles and len(available_unit_ids) > 0:
                 test_tile = untested_tiles[0]
                 u = available_unit_ids[0]
                 available_unit_ids = available_unit_ids[1:]
-                # Move unit u to test_tile
+                used_units.add(u)
+
                 ux, uy = obs["units"]["position"][self.team_id][u]
                 tx, ty = test_tile
                 if (ux, uy) != (tx, ty):
                     direction = direction_to(np.array([ux, uy]), np.array([tx, ty]))
                     actions[u] = [direction, 0, 0]
                 else:
-                    actions[u] = [0,0,0]
-                used_units.add(u)
-                # Record this testing action for next turn's inference
+                    actions[u] = [0, 0, 0]
+
+                # Set testing context
                 self.current_tester_tile = test_tile
                 self.current_tester_tile_relic = (rx, ry)
-                # Expected baseline gain is the sum of currently known reward tiles occupied
-                self.expected_baseline_gain = len(reward_tiles)  # since each yields 1 point presumably
-                # Once we place a tester, break out if you only want to test one tile total
-                break
+                self.expected_baseline_gain = len(reward_tiles)  # baseline is number of known reward tiles
+                done_testing_for_this_turn = True
 
-        if num_units == 0:
-            # No units available
-            return actions
+        # After relic assignments, any remaining units can do sapping or vision
 
+        # --- Sapping Logic ---
+        # Try to sap if beneficial
         map_width = self.env_cfg["map_width"]
         map_height = self.env_cfg["map_height"]
-
-        # Sap parameters
         sap_range = self.env_cfg.get("unit_sap_range", 1)
         sap_cost = self.env_cfg.get("unit_sap_cost", 10)
 
-        # Identify visible opponent units
+        opp_positions = np.array(obs["units"]["position"][self.opp_team_id])
+        opp_energy = np.array(obs["units"]["energy"][self.opp_team_id])
         opp_visible_mask = (opp_positions[:,0] != -1) & (opp_positions[:,1] != -1)
         visible_opp_ids = np.where(opp_visible_mask)[0]
 
-        # Enemy positions dictionary for sapping logic
         enemy_positions = {}
         for oid in visible_opp_ids:
             ex, ey = opp_positions[oid]
@@ -180,35 +160,13 @@ class RelicHuntingShootingAgent:
                 enemy_positions[(ex, ey)] = []
             enemy_positions[(ex, ey)].append(oid)
 
-        # Determine visible relics
-        # obs["relic_nodes_mask"] = shape (R,)
-        # obs["relic_nodes"] = shape (R, 2)
-        relic_nodes_mask = obs["relic_nodes_mask"]
-        relic_nodes_positions = obs["relic_nodes"][relic_nodes_mask]  # This gives only visible relics
-        relics = relic_nodes_positions.tolist()  # list of (x, y) for visible relics
-
-        # Calculate current relic gain based on team points difference
-        current_team_points = obs["team_points"][self.team_id]
-        current_relic_gain = current_team_points - self.last_team_points
-
-        # Adjust relic_allocation
-        # if len(relics) > 0:
-        #     pass
-            # if current_relic_gain > self.last_relic_gain:
-            #     self.relic_allocation = min(self.relic_allocation + 1, num_units)
-            # else:
-            #     self.relic_allocation = max(self.relic_allocation - 1, 1)
-        # else:
-        #     self.relic_allocation = 0
-
-        self.last_relic_gain = current_relic_gain
-
-        # Step 1: Attempt sapping
         sap_done = set()
-        for unit_id in available_unit_ids:
-            ux, uy = unit_positions[unit_id]
-            uenergy = unit_energy[unit_id]
+        # Only consider units not used by relic assignments
+        sap_candidates = [u for u in available_unit_ids if u not in used_units]
 
+        for unit_id in sap_candidates:
+            ux, uy = obs["units"]["position"][self.team_id][unit_id]
+            uenergy = obs["units"]["energy"][self.team_id][unit_id]
             if uenergy > sap_cost:
                 found_target = False
                 for dx in range(-sap_range, sap_range + 1):
@@ -218,7 +176,7 @@ class RelicHuntingShootingAgent:
                         if tx < 0 or tx >= map_width or ty < 0 or ty >= map_height:
                             continue
 
-                        # Count enemies in the 3x3 area centered on (tx, ty)
+                        # Count enemies in 3x3 area
                         center_count = 0
                         adjacent_count = 0
                         for adjx in [-1, 0, 1]:
@@ -240,66 +198,20 @@ class RelicHuntingShootingAgent:
                     if found_target:
                         break
 
-        # Units that didn't sap proceed with relic or vision logic
-        remaining_units = [u for u in available_unit_ids if u not in sap_done]
-        if len(remaining_units) == 0:
-            # Update last_team_points before returning
-            self.last_team_points = current_team_points
-            return actions
+        # Remove sapping units from the pool
+        final_remaining_units = [u for u in sap_candidates if u not in sap_done]
 
-        # If we have relics and an allocation, choose some units to go to relic areas
-        relic_targets = []
-        if len(relics) > 0:
-            # Pick a pattern around each relic - a 5x5 block centered on the relic
-            block_radius = 2
-            for (rx, ry) in relics:
-                for bx in range(rx - block_radius, rx + block_radius + 1):
-                    for by in range(ry - block_radius, ry + block_radius + 1):
-                        if 0 <= bx < map_width and 0 <= by < map_height:
-                            relic_targets.append((bx, by))
-            # Deduplicate
-            relic_targets = list(set(relic_targets))
-
-        # Relic assignment
-        if self.relic_allocation > 0 and len(relic_targets) > 0:
-            relic_units_count = min(self.relic_allocation, len(remaining_units), len(relic_targets))
-            relic_cost_matrix = np.zeros((len(remaining_units), len(relic_targets)), dtype=int)
-            for i, u in enumerate(remaining_units):
-                ux, uy = unit_positions[u]
-                for j, (tx, ty) in enumerate(relic_targets):
-                    dist = abs(ux - tx) + abs(uy - ty)
-                    relic_cost_matrix[i, j] = dist
-
-            row_ind, col_ind = linear_sum_assignment(relic_cost_matrix)
-            pairs = sorted(zip(row_ind, col_ind), key=lambda rc: relic_cost_matrix[rc[0], rc[1]])
-
-            assigned_to_relic = set()
-            relic_unit_to_target = {}
-            for r, c in pairs[:relic_units_count]:
-                u = remaining_units[r]
-                relic_unit_to_target[u] = relic_targets[c]
-                assigned_to_relic.add(u)
-
-            remaining_units = [u for u in remaining_units if u not in assigned_to_relic]
-
-            for u, (tx, ty) in relic_unit_to_target.items():
-                ux, uy = unit_positions[u]
-                if ux == tx and uy == ty:
-                    actions[u] = [0, 0, 0]
-                else:
-                    direction = direction_to(np.array([ux, uy]), np.array([tx, ty]))
-                    actions[u] = [direction, 0, 0]
-
-        # Vision assignment for remaining units
-        if len(remaining_units) > 0:
-            still_num_units = len(remaining_units)
+        # --- Vision Assignment ---
+        # Assign leftover units to a vision pattern
+        still_num_units = len(final_remaining_units)
+        if still_num_units > 0:
             rows = int(np.floor(np.sqrt(still_num_units)))
             cols = int(np.ceil(still_num_units / rows))
             while rows * cols < still_num_units:
                 cols += 1
 
-            cell_width = self.env_cfg["map_width"] / cols
-            cell_height = self.env_cfg["map_height"] / rows
+            cell_width = map_width / cols
+            cell_height = map_height / rows
             assigned_cell_count = min(still_num_units, rows*cols)
             targets = []
             for i in range(assigned_cell_count):
@@ -311,46 +223,38 @@ class RelicHuntingShootingAgent:
                 cell_center_y = min(cell_center_y, map_height - 1)
                 targets.append((cell_center_x, cell_center_y))
 
-            num_remaining = still_num_units
-            used_cell_count = min(num_remaining, assigned_cell_count)
-            if used_cell_count == 0:
-                for u in remaining_units:
-                    actions[u] = [0, 0, 0]
-            else:
-                cost_matrix = np.zeros((num_remaining, used_cell_count), dtype=int)
-                for i, unit_id in enumerate(remaining_units):
-                    ux, uy = unit_positions[unit_id]
-                    for j in range(used_cell_count):
-                        tx, ty = targets[j]
-                        dist = abs(ux - tx) + abs(uy - ty)
-                        cost_matrix[i, j] = dist
+            cost_matrix = np.zeros((still_num_units, assigned_cell_count), dtype=int)
+            for i, unit_id in enumerate(final_remaining_units):
+                ux, uy = obs["units"]["position"][self.team_id][unit_id]
+                for j, (tx, ty) in enumerate(targets):
+                    dist = abs(ux - tx) + abs(uy - ty)
+                    cost_matrix[i, j] = dist
 
-                row_ind, col_ind = linear_sum_assignment(cost_matrix)
-                unit_to_target = {}
-                for r, c in zip(row_ind, col_ind):
-                    unit_id = remaining_units[r]
-                    tx, ty = targets[c]
-                    unit_to_target[unit_id] = (tx, ty)
+            row_ind, col_ind = linear_sum_assignment(cost_matrix)
+            unit_to_target = {}
+            for r, c in zip(row_ind, col_ind):
+                unit_id = final_remaining_units[r]
+                tx, ty = targets[c]
+                unit_to_target[unit_id] = (tx, ty)
 
-                assigned_units = set(unit_to_target.keys())
-                unassigned_units = set(remaining_units) - assigned_units
+            assigned_units = set(unit_to_target.keys())
+            unassigned_units = set(final_remaining_units) - assigned_units
 
-                # Move assigned units towards targets
-                for unit_id, (tx, ty) in unit_to_target.items():
-                    ux, uy = unit_positions[unit_id]
-                    if ux == tx and uy == ty:
-                        actions[unit_id] = [0, 0, 0]
-                    else:
-                        direction = direction_to(np.array([ux, uy]), np.array([tx, ty]))
-                        actions[unit_id] = [direction, 0, 0]
-
-                # Unassigned units do nothing
-                for unit_id in unassigned_units:
+            # Move assigned units
+            for unit_id, (tx, ty) in unit_to_target.items():
+                ux, uy = obs["units"]["position"][self.team_id][unit_id]
+                if ux == tx and uy == ty:
                     actions[unit_id] = [0, 0, 0]
+                else:
+                    direction = direction_to(np.array([ux, uy]), np.array([tx, ty]))
+                    actions[unit_id] = [direction, 0, 0]
+
+            # Unassigned units do nothing
+            for unit_id in unassigned_units:
+                actions[unit_id] = [0, 0, 0]
 
         # Update last_team_points for next turn
         self.last_team_points = current_team_points
-
         return actions
 
 class BetterShootingVisionAgent:
