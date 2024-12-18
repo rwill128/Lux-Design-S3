@@ -5,6 +5,9 @@ from luxai_s3.wrappers import LuxAIS3GymEnv, RecordEpisode
 from agents.baseline_agent.baselineagent import BaselineAgent
 from lux.utils import direction_to
 
+# You can install scipy if not already available:
+# !pip install scipy
+from scipy.optimize import linear_sum_assignment
 
 class Agent:
     def __init__(self, player: str, env_cfg) -> None:
@@ -29,49 +32,78 @@ class Agent:
         # Apply the sensor mask to the energy map
         visible_energy = np.where(sensor_mask, energy_map, -9999)
 
-        # Find all visible tiles sorted by energy in descending order
-        # Flatten the array, get indices, then unflatten
+        # Flatten and find indices of visible tiles with energy >= 0
         flat_energy = visible_energy.flatten()
-        # Get indices of sorted tiles by energy descending
-        sorted_indices = np.argsort(flat_energy)[::-1]
-
-        # Filter out tiles that have negative (invisible) energy
-        sorted_indices = sorted_indices[flat_energy[sorted_indices] > -1]
+        valid_indices = np.where(flat_energy > -1)[0]
 
         # If no visible tile, do nothing
-        if len(sorted_indices) == 0:
+        if len(valid_indices) == 0:
             return actions
 
-        # We'll assign each unit a tile in descending order of energy.
-        # If more units than tiles, some units will do nothing at the end.
-        # If more tiles than units, we just ignore extra tiles.
+        # Extract tile coordinates and their values
+        w = energy_map.shape[1]  # width
+        tile_coords = []
+        tile_values = []
+        for idx in valid_indices:
+            tile_y = idx // w
+            tile_x = idx % w
+            tile_coords.append((tile_x, tile_y))
+            tile_values.append(visible_energy[tile_y, tile_x])
+
+        # Sort tiles by energy descending
+        tile_coords = [t for _, t in sorted(zip(tile_values, tile_coords), key=lambda x: x[0], reverse=True)]
+
+        # Now we have tile_coords sorted by value descending
+        # If fewer tiles than units, not all units will be assigned
+        # If more tiles than units, not all tiles get a unit
         num_units = len(available_unit_ids)
-        num_tiles = len(sorted_indices)
+        num_tiles = len(tile_coords)
         assign_count = min(num_units, num_tiles)
 
-        # Assign top assign_count tiles to units
-        for i in range(assign_count):
-            unit_id = available_unit_ids[i]
-            tile_idx = sorted_indices[i]
-            w = energy_map.shape[1]  # width
-            h = energy_map.shape[0]  # height
+        # Create cost matrix for assignment:
+        # Rows: units, Cols: tiles, cost = Manhattan distance (or Euclidean if you prefer)
+        cost_matrix = np.zeros((assign_count, assign_count), dtype=int)
 
-            # Convert flat index back to (y, x)
-            tile_y = tile_idx // w
-            tile_x = tile_idx % w
+        # If we have fewer tiles than units or vice versa, we'll limit to assign_count for both
+        # and ignore extra units or tiles
+        selected_units = available_unit_ids[:assign_count]
+        selected_tiles = tile_coords[:assign_count]
 
-            unit_x, unit_y = unit_positions[unit_id]
-            # If unit is already on the tile, do nothing
-            if unit_x == tile_x and unit_y == tile_y:
+        for i, unit_id in enumerate(selected_units):
+            ux, uy = unit_positions[unit_id]
+            for j, (tx, ty) in enumerate(selected_tiles):
+                # Manhattan distance
+                dist = abs(ux - tx) + abs(uy - ty)
+                cost_matrix[i, j] = dist
+
+        # Solve the assignment problem
+        # linear_sum_assignment returns the optimal row->col mapping
+        row_ind, col_ind = linear_sum_assignment(cost_matrix)
+
+        # row_ind[i], col_ind[i] means selected_units[row_ind[i]] assigned to selected_tiles[col_ind[i]]
+
+        # Create a mapping of unit_id to tile coordinate
+        unit_to_tile = {}
+        for r, c in zip(row_ind, col_ind):
+            unit_id = selected_units[r]
+            tile_x, tile_y = selected_tiles[c]
+            unit_to_tile[unit_id] = (tile_x, tile_y)
+
+        # Units not assigned remain unassigned
+        unassigned_units = set(available_unit_ids) - set(unit_to_tile.keys())
+
+        # Move assigned units towards their assigned tiles
+        for unit_id, (tile_x, tile_y) in unit_to_tile.items():
+            ux, uy = unit_positions[unit_id]
+            if ux == tile_x and uy == tile_y:
+                # Already there, do nothing
                 actions[unit_id] = [0, 0, 0]
             else:
-                # Move unit towards assigned tile
-                direction = direction_to(np.array([unit_x, unit_y]), np.array([tile_x, tile_y]))
+                direction = direction_to(np.array([ux, uy]), np.array([tile_x, tile_y]))
                 actions[unit_id] = [direction, 0, 0]
 
-        # Remaining units (if any) do nothing
-        for i in range(assign_count, num_units):
-            unit_id = available_unit_ids[i]
+        # Unassigned units do nothing
+        for unit_id in unassigned_units:
             actions[unit_id] = [0, 0, 0]
 
         return actions
