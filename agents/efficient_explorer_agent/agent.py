@@ -54,6 +54,17 @@ class EfficientExplorer(Role):
 
         return [best_move, 0, 0]  # Return the best move decision
 
+class RandomMover(Role):
+    """Random exploration role for units."""
+    def decide_action(self):
+        if self.step % 20 == 0 or self.unit_id not in self.agent.unit_explore_locations:
+            rand_loc = (
+                np.random.randint(0, self.agent.env_cfg["map_width"]),
+                np.random.randint(0, self.agent.env_cfg["map_height"]),
+            )
+            self.agent.unit_explore_locations[self.unit_id] = rand_loc
+        return [direction_to(self.unit_pos, self.agent.unit_explore_locations[self.unit_id]), 0, 0]
+
 class RelicPointGainer(Role):
     """Role to hover around relic nodes to gain points."""
     def decide_action(self):
@@ -75,6 +86,7 @@ class Agent:
         self.unit_explore_locations = dict()
 
     def act(self, step: int, obs, remainingOverageTime: int = 60):
+        self.obs = obs  # Store the current observation
         unit_mask = np.array(obs["units_mask"][self.team_id])
         unit_positions = np.array(obs["units"]["position"][self.team_id])
         observed_relic_nodes = np.array(obs["relic_nodes"])
@@ -100,5 +112,5 @@ class Agent:
             )
             actions[unit_id] = role.decide_action()
 
-
         return actions
+

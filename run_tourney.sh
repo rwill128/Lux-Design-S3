@@ -8,6 +8,6 @@ OUTPUT_DIR="replays/run_$TIMESTAMP"
 mkdir -p "$OUTPUT_DIR"
 
 # Run the Lux AI tournament and save the replay
-luxai-s3 agents --tournament --output "$OUTPUT_DIR/replay.json" --replay.no-compressed-obs --verbose 3 --tournament-cfg-max-episodes 50
+luxai-s3 agents --tournament --output "$OUTPUT_DIR/replay.json" --replay.no-compressed-obs --verbose 3 --tournament-cfg-max-episodes 500 --tournament-cfg-concurrent 18
 
 echo "Replay saved to: $OUTPUT_DIR/replay.json"

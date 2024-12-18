@@ -25,7 +25,7 @@ luxai-s3 --help
 ```
 
 ```bash
-luxai-s3 agents --tournament --output replays/run_3/replay.json --replay.no-compressed-obs --tournament-cfg-max-episodes 10
+luxai-s3 agents/baseline_agent/main.py agents/efficient_explorer_agent/main.py --tournament --output replays/explorer/replay.json --replay.no-compressed-obs --tournament-cfg-max-episodes 10
 ```
 
 Then upload the replay.json to the online visualizer here: https://s3vis.lux-ai.org/ (a link on the lux-ai.org website will be up soon) 

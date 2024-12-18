@@ -1,7 +1,7 @@
 from lux.utils import direction_to
 import sys
 import numpy as np
-class Agent():
+class BaselineAgent():
     def __init__(self, player: str, env_cfg) -> None:
         self.player = player
         self.opp_player = "player_1" if self.player == "player_0" else "player_0"

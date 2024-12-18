@@ -5,8 +5,9 @@ from argparse import Namespace
 
 import numpy as np
 
-from agent import Agent
+from agents.baseline_agent.baselineagent import BaselineAgent
 # from lux.config import EnvConfig
+
 from lux.kit import from_json
 ### DO NOT REMOVE THE FOLLOWING CODE ###
 agent_dict = dict() # store potentially multiple dictionaries as kaggle imports code directly
@@ -23,10 +24,11 @@ def agent_fn(observation, configurations):
     player = observation.player
     remainingOverageTime = observation.remainingOverageTime
     if step == 0:
-        agent_dict[player] = Agent(player, configurations["env_cfg"])
+        agent_dict[player] = BaselineAgent(player, configurations["env_cfg"])
     agent = agent_dict[player]
     actions = agent.act(step, from_json(obs), remainingOverageTime)
     return dict(action=actions.tolist())
+
 if __name__ == "__main__":
     
     def read_input():
