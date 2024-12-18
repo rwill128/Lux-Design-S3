@@ -24,6 +24,6 @@ luxai-s3 agents/efficient_explorer_agent/main.py \
          agents/5_hunter/main.py \
          agents/10_hunter/main.py \
          agents/energy_conserver_agent/main.py \
-          --tournament --output "$OUTPUT_DIR/replay.json" --replay.no-compressed-obs --verbose 3 --tournament-cfg-max-episodes 500 --tournament-cfg-concurrent 10
+          --tournament --output "$OUTPUT_DIR/replay.json" --replay.no-compressed-obs --verbose 3 --tournament-cfg-max-episodes 1000 --tournament-cfg-concurrent 15
 
 echo "Replay saved to: $OUTPUT_DIR/replay.json"

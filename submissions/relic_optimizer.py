@@ -4,9 +4,22 @@ from argparse import Namespace
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
-from lux.kit import from_json
-from lux.utils import direction_to
-
+def direction_to(src, target):
+    ds = target - src
+    dx = ds[0]
+    dy = ds[1]
+    if dx == 0 and dy == 0:
+        return 0
+    if abs(dx) > abs(dy):
+        if dx > 0:
+            return 2
+        else:
+            return 4
+    else:
+        if dy > 0:
+            return 3
+        else:
+            return 1
 
 class RelicHuntingShootingAgent:
     def __init__(self, player: str, env_cfg) -> None:
@@ -344,6 +357,16 @@ class RelicHuntingShootingAgent:
 
         return actions
 
+def from_json(state):
+    if isinstance(state, list):
+        return np.array(state)
+    elif isinstance(state, dict):
+        out = {}
+        for k in state:
+            out[k] = from_json(state[k])
+        return out
+    else:
+        return state
 
 ### DO NOT REMOVE THE FOLLOWING CODE ###
 agent_dict = dict() # store potentially multiple dictionaries as kaggle imports code directly
@@ -367,7 +390,7 @@ def agent_fn(observation, configurations):
     return dict(action=actions.tolist())
 
 if __name__ == "__main__":
-    
+
     def read_input():
         """
         Reads input from stdin
