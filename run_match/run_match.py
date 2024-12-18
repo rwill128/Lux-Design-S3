@@ -3,6 +3,8 @@ import os
 from luxai_s3.wrappers import LuxAIS3GymEnv, RecordEpisode
 
 from agents.baseline_agent.baselineagent import BaselineAgent
+from lux.utils import direction_to
+
 
 class Agent:
     def __init__(self, player: str, env_cfg) -> None:
@@ -13,62 +15,67 @@ class Agent:
         np.random.seed(0)
         self.env_cfg = env_cfg
 
-    def count_visible_tiles(obs, team_id):
-        # sensor_mask is shape (W, H). True means visible.
-        sensor_mask = obs["sensor_mask"]
-        # Count how many tiles are visible to the given team.
-        # Note: sensor_mask is currently 2D, but per the docs it's for each team.
-        # In some versions, sensor_mask might be shaped differently or per-team.
-        # Adjust indexing accordingly if needed.
-        visible_count = np.sum(sensor_mask)
-        return visible_count
-
-    def total_team_energy(obs, team_id):
-        # obs["units"]["energy"] is shape (T, N) or (T, N, 1). Check actual shape.
-        # In your snippet it's shape (T, N) after extracting.
-        team_energy = obs["units"]["energy"][team_id]
-        # Ignore -1 (means no unit)
-        valid_energy = team_energy[team_energy != -1]
-        return np.sum(valid_energy)
-
-    def points_delta(obs, prev_obs, team_id):
-        if prev_obs is None:
-            return 0
-        return obs["team_points"][team_id] - prev_obs["team_points"][team_id]
-
-    def find_high_value_tiles(obs, threshold=5):
-        # obs["map_features"]["energy"] is shape (W, H)
-        energy_map = obs["map_features"]["energy"]
-        # Find coordinates where energy > threshold
-        coords = np.argwhere(energy_map > threshold)
-        return coords
-
-    def unit_positions(obs, team_id):
-        # obs["units"]["position"] is shape (T, N, 2)
-        positions = obs["units"]["position"][team_id]
-        # Filter out invalid (-1, -1) positions
-        valid_pos = positions[~(positions == -1).any(axis=1)]
-        return valid_pos
-
-    def average_distance_to_high_value_tiles(units_pos, high_value_tiles):
-        if len(high_value_tiles) == 0 or len(units_pos) == 0:
-            return None
-        # Compute pairwise distances and return average of nearest distances
-        avg_dist = 0
-        for pos in units_pos:
-            distances = np.sum((high_value_tiles - pos)**2, axis=1)**0.5
-            avg_dist += np.min(distances)
-        avg_dist /= len(units_pos)
-        return avg_dist
-
     def act(self, step: int, obs, remainingOverageTime: int = 60):
-            """
-            Implement your logic here. This is just a dummy agent that does nothing.
-            """
-            unit_mask = np.array(obs["units_mask"][self.team_id])  # shape (max_units, )
-            actions = np.zeros((self.env_cfg["max_units"], 3), dtype=int)
-            # Insert your decision logic here if desired
+        unit_mask = np.array(obs["units_mask"][self.team_id])  # shape (max_units,)
+        unit_positions = np.array(obs["units"]["position"][self.team_id])  # shape (max_units, 2)
+        sensor_mask = obs["sensor_mask"]  # shape (W, H)
+        energy_map = obs["map_features"]["energy"]  # shape (W, H)
+
+        actions = np.zeros((self.env_cfg["max_units"], 3), dtype=int)
+
+        # Identify available units
+        available_unit_ids = np.where(unit_mask)[0]
+
+        # Apply the sensor mask to the energy map
+        visible_energy = np.where(sensor_mask, energy_map, -9999)
+
+        # Find all visible tiles sorted by energy in descending order
+        # Flatten the array, get indices, then unflatten
+        flat_energy = visible_energy.flatten()
+        # Get indices of sorted tiles by energy descending
+        sorted_indices = np.argsort(flat_energy)[::-1]
+
+        # Filter out tiles that have negative (invisible) energy
+        sorted_indices = sorted_indices[flat_energy[sorted_indices] > -1]
+
+        # If no visible tile, do nothing
+        if len(sorted_indices) == 0:
             return actions
+
+        # We'll assign each unit a tile in descending order of energy.
+        # If more units than tiles, some units will do nothing at the end.
+        # If more tiles than units, we just ignore extra tiles.
+        num_units = len(available_unit_ids)
+        num_tiles = len(sorted_indices)
+        assign_count = min(num_units, num_tiles)
+
+        # Assign top assign_count tiles to units
+        for i in range(assign_count):
+            unit_id = available_unit_ids[i]
+            tile_idx = sorted_indices[i]
+            w = energy_map.shape[1]  # width
+            h = energy_map.shape[0]  # height
+
+            # Convert flat index back to (y, x)
+            tile_y = tile_idx // w
+            tile_x = tile_idx % w
+
+            unit_x, unit_y = unit_positions[unit_id]
+            # If unit is already on the tile, do nothing
+            if unit_x == tile_x and unit_y == tile_y:
+                actions[unit_id] = [0, 0, 0]
+            else:
+                # Move unit towards assigned tile
+                direction = direction_to(np.array([unit_x, unit_y]), np.array([tile_x, tile_y]))
+                actions[unit_id] = [direction, 0, 0]
+
+        # Remaining units (if any) do nothing
+        for i in range(assign_count, num_units):
+            unit_id = available_unit_ids[i]
+            actions[unit_id] = [0, 0, 0]
+
+        return actions
+
 
 def evaluate_agents(agent_1_cls, agent_2_cls, seed=42, games_to_play=3, replay_save_dir="replays"):
     # Ensure the replay directory exists
