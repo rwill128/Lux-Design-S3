@@ -1,36 +1,11 @@
-import numpy as np
 import os
 from luxai_s3.wrappers import LuxAIS3GymEnv, RecordEpisode
 
 from agents.baseline_agent.baselineagent import BaselineAgent
-import numpy as np
-from lux.utils import direction_to
-from scipy.optimize import linear_sum_assignment
-
-import numpy as np
-from lux.utils import direction_to
-from scipy.optimize import linear_sum_assignment
-
-import numpy as np
-from lux.utils import direction_to
-from scipy.optimize import linear_sum_assignment
 
 from scipy.optimize import linear_sum_assignment
 import numpy as np
-import math
 from collections import deque
-
-def direction_to(from_pos, to_pos):
-    # Simple directional logic: return an action code that moves from_pos closer to to_pos
-    dx = to_pos[0] - from_pos[0]
-    dy = to_pos[1] - from_pos[1]
-    # Prioritize horizontal or vertical moves
-    # Example action encoding: 1=UP,2=RIGHT,3=DOWN,4=LEFT,0=STAY
-    # You may need to adjust this depending on your environment's move coding
-    if abs(dx) > abs(dy):
-        return 2 if dx > 0 else 4  # move horizontally
-    else:
-        return 3 if dy > 0 else 1  # move vertically
 
 class RelicHuntingShootingAgent:
     def __init__(self, player: str, env_cfg) -> None:
@@ -49,11 +24,28 @@ class RelicHuntingShootingAgent:
 
         self.last_team_points = 0
         self.relic_tile_data = {}
+        self.known_asteroids = set()  # store (x, y) of known asteroids
 
     def is_passable_tile(self, x, y, obs):
-        # Tile types: 0 = empty, 1 = nebula, 2 = asteroid
-        tile_type = obs["map_features"]["tile_type"][x, y]
-        return tile_type != 2  # passable if not asteroid
+        # If we have stored known asteroid locations:
+        if (x, y) in self.known_asteroids:
+            return False
+
+        # Check if tile is within vision
+        sensor_mask = obs["sensor_mask"]
+        if sensor_mask[x, y]:
+            # We can see this tile
+            tile_type = obs["map_features"]["tile_type"][x, y]
+            if tile_type == 2:
+                # It's an asteroid, store it and return False
+                self.known_asteroids.add((x, y))
+                return False
+            else:
+                # Visible and not asteroid
+                return True
+        else:
+            # We can't see this tile. Let's assume it's passable.
+            return True
 
     def get_neighbors(self, x, y, map_width, map_height, obs):
         directions = [(0,0), (1,0), (-1,0), (0,1), (0,-1)]
@@ -91,28 +83,40 @@ class RelicHuntingShootingAgent:
 
     def get_direction_via_pathfinding(self, from_pos, to_pos, obs):
         if from_pos == to_pos:
-            return 0  # already at target
+            return 0  # Already at target
 
         path = self.bfs_pathfind(from_pos, to_pos, obs)
         if path is None or len(path) < 2:
-            # No path found or no movement needed, just stay
-            return 0
-        # path[0] is start, path[1] is next step
+            # BFS failed: fallback to simple heuristic
+            return self.simple_heuristic_move(from_pos, to_pos)
+        # BFS succeeded: move along the path
         next_step = path[1]
         dx = next_step[0] - from_pos[0]
         dy = next_step[1] - from_pos[1]
+        return self.dxdy_to_action(dx, dy)
 
-        # Convert dx, dy to action code
-        # 1=UP,2=RIGHT,3=DOWN,4=LEFT,0=STAY
+    def simple_heuristic_move(self, from_pos, to_pos):
+        # Move in direction that reduces Manhattan distance
+        (fx, fy) = from_pos
+        (tx, ty) = to_pos
+        dx = tx - fx
+        dy = ty - fy
+        # Prioritize the axis with greatest distance
+        if abs(dx) > abs(dy):
+            return 2 if dx > 0 else 4  # move right or left
+        else:
+            return 3 if dy > 0 else 1  # move down or up
+
+    def dxdy_to_action(self, dx, dy):
         if dx > 0:
-            return 2  # move right
+            return 2  # right
         elif dx < 0:
-            return 4  # move left
+            return 4  # left
         elif dy > 0:
-            return 3  # move down
+            return 3  # down
         elif dy < 0:
-            return 1  # move up
-        return 0
+            return 1  # up
+        return 0  # stay
 
 
     def update_tile_results(self, current_points, obs):
@@ -218,7 +222,7 @@ class RelicHuntingShootingAgent:
                 ux, uy = obs["units"]["position"][self.team_id][u]
                 tx, ty = test_tile
                 if (ux, uy) != (tx, ty):
-                    direction = direction_to(np.array([ux, uy]), np.array([tx, ty]))
+                    direction = self.get_direction_via_pathfinding((ux, uy), (tx, ty), obs)
                     actions[u] = [direction, 0, 0]
                 else:
                     actions[u] = [0,0,0]
@@ -349,7 +353,7 @@ class RelicHuntingShootingAgent:
                 if ux == tx and uy == ty:
                     actions[u] = [0, 0, 0]
                 else:
-                    direction = direction_to(np.array([ux, uy]), np.array([tx, ty]))
+                    direction = self.get_direction_via_pathfinding((ux, uy), (tx, ty), obs)
                     actions[u] = [direction, 0, 0]
 
         # Vision assignment for remaining units
@@ -403,7 +407,7 @@ class RelicHuntingShootingAgent:
                     if ux == tx and uy == ty:
                         actions[unit_id] = [0, 0, 0]
                     else:
-                        direction = direction_to(np.array([ux, uy]), np.array([tx, ty]))
+                        direction = self.get_direction_via_pathfinding((ux, uy), (tx, ty), obs)
                         actions[unit_id] = [direction, 0, 0]
 
                 # Unassigned units do nothing
