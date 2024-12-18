@@ -18,6 +18,7 @@ from scipy.optimize import linear_sum_assignment
 from scipy.optimize import linear_sum_assignment
 import numpy as np
 import math
+from collections import deque
 
 def direction_to(from_pos, to_pos):
     # Simple directional logic: return an action code that moves from_pos closer to to_pos
@@ -48,9 +49,70 @@ class RelicHuntingShootingAgent:
 
         self.last_team_points = 0
         self.relic_tile_data = {}
-        # relic_tile_data[relic_position] = {
-        #    (tile_x, tile_y): {"tested": bool, "reward_tile": bool}
-        # }
+
+    def is_passable_tile(self, x, y, obs):
+        # Tile types: 0 = empty, 1 = nebula, 2 = asteroid
+        tile_type = obs["map_features"]["tile_type"][x, y]
+        return tile_type != 2  # passable if not asteroid
+
+    def get_neighbors(self, x, y, map_width, map_height, obs):
+        directions = [(0,0), (1,0), (-1,0), (0,1), (0,-1)]
+        neighbors = []
+        for dx, dy in directions:
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < map_width and 0 <= ny < map_height:
+                if self.is_passable_tile(nx, ny, obs):
+                    neighbors.append((nx, ny))
+        return neighbors
+
+    def bfs_pathfind(self, start, goal, obs):
+        map_width = self.env_cfg["map_width"]
+        map_height = self.env_cfg["map_height"]
+        queue = deque([start])
+        came_from = {start: None}
+
+        while queue:
+            current = queue.popleft()
+            if current == goal:
+                # Reconstruct path
+                path = []
+                while current is not None:
+                    path.append(current)
+                    current = came_from[current]
+                path.reverse()
+                return path
+
+            for n in self.get_neighbors(current[0], current[1], map_width, map_height, obs):
+                if n not in came_from:
+                    came_from[n] = current
+                    queue.append(n)
+
+        return None
+
+    def get_direction_via_pathfinding(self, from_pos, to_pos, obs):
+        if from_pos == to_pos:
+            return 0  # already at target
+
+        path = self.bfs_pathfind(from_pos, to_pos, obs)
+        if path is None or len(path) < 2:
+            # No path found or no movement needed, just stay
+            return 0
+        # path[0] is start, path[1] is next step
+        next_step = path[1]
+        dx = next_step[0] - from_pos[0]
+        dy = next_step[1] - from_pos[1]
+
+        # Convert dx, dy to action code
+        # 1=UP,2=RIGHT,3=DOWN,4=LEFT,0=STAY
+        if dx > 0:
+            return 2  # move right
+        elif dx < 0:
+            return 4  # move left
+        elif dy > 0:
+            return 3  # move down
+        elif dy < 0:
+            return 1  # move up
+        return 0
 
 
     def update_tile_results(self, current_points, obs):
@@ -96,9 +158,6 @@ class RelicHuntingShootingAgent:
         unit_energy = np.array(obs["units"]["energy"][self.team_id])  # shape (N,)
 
         opp_positions = np.array(obs["units"]["position"][self.opp_team_id])  # (N, 2)
-        opp_energy = np.array(obs["units"]["energy"][self.opp_team_id])       # (N,)
-
-        actions = np.zeros((self.env_cfg["max_units"], 3), dtype=int)
 
         available_unit_ids = np.where(unit_mask)[0]
         num_units = len(available_unit_ids)
@@ -145,7 +204,7 @@ class RelicHuntingShootingAgent:
                 ux, uy = obs["units"]["position"][self.team_id][u]
                 tx, ty = tile
                 if (ux, uy) != (tx, ty):
-                    direction = direction_to(np.array([ux, uy]), np.array([tx, ty]))
+                    direction = self.get_direction_via_pathfinding((ux, uy), (tx, ty), obs)
                     actions[u] = [direction, 0, 0]
                 else:
                     actions[u] = [0,0,0]
