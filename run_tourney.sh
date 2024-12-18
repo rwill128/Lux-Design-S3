@@ -12,6 +12,7 @@ luxai-s3 agents/efficient_explorer_agent/main.py \
          agents/baseline_agent/main.py \
          agents/shooting_vision_agent/main.py \
          agents/better_shooting_vision_agent/main.py \
+         agents/relic_hunting_shooting_vision_agent/main.py \
          agents/high_vision_agent/main.py \
          agents/roles_based_agent/main.py \
          agents/balanced_agent/main.py \
