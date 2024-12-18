@@ -20,7 +20,7 @@ class RelicHuntingShootingAgent:
         # Attributes for relic logic
         self.last_team_points = 0
         self.last_relic_gain = 0
-        self.relic_allocation = 10
+        self.relic_allocation = 20
         self.current_tester_tile = None
 
         self.last_team_points = 0
@@ -30,20 +30,34 @@ class RelicHuntingShootingAgent:
         # }
 
 
-    def update_tile_results(self, current_points):
-        gain = current_points - self.last_team_points
+    def update_tile_results(self, current_points, obs):
 
         # If we had a tester tile assigned last turn:
         if self.current_tester_tile and self.current_tester_tile_relic:
-            # If gain increased by 1 compared to expected baseline,
-            # we mark this tile as reward_tile = True
-            if gain > self.expected_baseline_gain:
-                self.relic_tile_data[self.current_tester_tile_relic][self.current_tester_tile]["reward_tile"] = True
+            # Check if a friendly unit is currently standing on the tile we tested last turn.
+            tile_occupied = False
+            for uid in np.where(obs["units_mask"][self.team_id])[0]:
+                ux, uy = obs["units"]["position"][self.team_id][uid]
+                if (ux, uy) == self.current_tester_tile:
+                    tile_occupied = True
+                    break
+
+            if tile_occupied:
+                # Proceed with the gain comparison logic
+                gain = current_points - self.last_team_points
+                if gain > self.expected_baseline_gain:
+                    self.relic_tile_data[self.current_tester_tile_relic][self.current_tester_tile]["reward_tile"] = True
+                else:
+                    self.relic_tile_data[self.current_tester_tile_relic][self.current_tester_tile]["reward_tile"] = False
+                self.relic_tile_data[self.current_tester_tile_relic][self.current_tester_tile]["tested"] = True
             else:
-                # no additional reward from that tile
-                self.relic_tile_data[self.current_tester_tile_relic][self.current_tester_tile]["reward_tile"] = False
-            self.relic_tile_data[self.current_tester_tile_relic][self.current_tester_tile]["tested"] = True
-            self.current_tester_tile = None
+                # The unit has not reached the tile yet, do not mark it tested or non-reward.
+                # Instead, keep self.current_tester_tile and retry next turn.
+                pass
+
+            if tile_occupied:
+                self.current_tester_tile = None
+
 
     def select_tiles_for_relic(self, relic_pos):
         # known reward tiles:
@@ -69,7 +83,7 @@ class RelicHuntingShootingAgent:
         current_team_points = obs["team_points"][self.team_id]
 
         # Update results from last turn's test
-        self.update_tile_results(current_team_points)
+        self.update_tile_results(current_team_points, obs)
 
         # Discover visible relic nodes and initialize their tile data if needed
         relic_nodes_mask = obs["relic_nodes_mask"]
