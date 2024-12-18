@@ -1,6 +1,4 @@
 import json
-from typing import Dict
-import sys
 from argparse import Namespace
 
 import numpy as np
@@ -8,7 +6,6 @@ from scipy.optimize import linear_sum_assignment
 
 from lux.kit import from_json
 from lux.utils import direction_to
-
 
 class BalancedAgent:
     def __init__(self, player: str, env_cfg) -> None:

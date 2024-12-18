@@ -2,6 +2,7 @@ import json
 from argparse import Namespace
 
 import numpy as np
+from scipy.optimize import linear_sum_assignment
 
 from lux.utils import direction_to
 from lux.kit import from_json
