@@ -1,12 +1,7 @@
 import json
-from typing import Dict
-import sys
 from argparse import Namespace
 
-import numpy as np
-
-from agents.baseline_agent.baselineagent import BaselineAgent
-# from lux.config import EnvConfig
+from baselineagent import BaselineAgent
 
 from lux.kit import from_json
 ### DO NOT REMOVE THE FOLLOWING CODE ###

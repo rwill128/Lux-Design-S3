@@ -1,5 +1,4 @@
 from lux.utils import direction_to
-import sys
 import numpy as np
 
 class Role:

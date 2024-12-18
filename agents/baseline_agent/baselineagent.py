@@ -1,6 +1,6 @@
 from lux.utils import direction_to
-import sys
 import numpy as np
+
 class BaselineAgent():
     def __init__(self, player: str, env_cfg) -> None:
         self.player = player
