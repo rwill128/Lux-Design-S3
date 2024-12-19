@@ -3,12 +3,8 @@ from luxai_s3.wrappers import LuxAIS3GymEnv, RecordEpisode
 
 from agents.baseline_agent.baselineagent import BaselineAgent
 
-from scipy.optimize import linear_sum_assignment
-import numpy as np
-
 import numpy as np
 from scipy.optimize import linear_sum_assignment
-import math
 
 
 class RelicHuntingShootingAgent:

@@ -29,7 +29,7 @@ class RelicHuntingShootingAgent:
         self.unknown_tiles = set()
         self.not_reward_tiles = set()
         self.known_reward_tiles = set()
-
+        self.last_gain = 0
         self.last_unknown_occupied = set()
 
         # New attribute to store known relic locations across games
@@ -352,7 +352,7 @@ class RelicHuntingShootingAgent:
                 self.last_unit_positions.append((ux, uy))
             return actions
 
-        relic_targets = self.known_relic_positions
+        relic_targets = list(self.known_relic_positions)
         if len(relics) > 0:
             block_radius = 2
             for (rx, ry) in relics:
@@ -361,6 +361,8 @@ class RelicHuntingShootingAgent:
                         if 0 <= bx < map_width and 0 <= by < map_height:
                             relic_targets.append((bx, by))
             relic_targets = list(set(relic_targets))
+
+        relic_targets = list(set(list(set(relic_targets) - set(self.not_reward_tiles)) + list(self.known_reward_tiles)))
 
         # Prioritization constants
         REWARD_BONUS = -50
