@@ -414,6 +414,38 @@ class RelicHuntingShootingAgent:
 
             self.end_of_match_printed = True
 
+        # After all assignments are done but before returning actions
+        final_positions = {}
+        for u in range(self.env_cfg["max_units"]):
+            direction = actions[u][0]
+            if direction == 0:
+                # Unit stays in place
+                final_pos = tuple(unit_positions[u])
+            else:
+                ux, uy = unit_positions[u]
+                if direction == 1:  # UP
+                    final_pos = (ux, uy - 1)
+                elif direction == 2: # RIGHT
+                    final_pos = (ux + 1, uy)
+                elif direction == 3: # DOWN
+                    final_pos = (ux, uy + 1)
+                elif direction == 4: # LEFT
+                    final_pos = (ux - 1, uy)
+                else:
+                    # Sap action (5) or any other action doesn't move the unit
+                    # If sap action doesn't move unit, final_pos = current pos
+                    # Adjust if needed.
+                    if direction == 5:
+                        final_pos = tuple(unit_positions[u])
+                    else:
+                        final_pos = tuple(unit_positions[u])
+
+            if final_pos in final_positions:
+                # Another unit is already moving here, let's force this unit to stay put
+                actions[u] = [0,0,0]
+            else:
+                final_positions[final_pos] = u
+
         return actions
 
 
