@@ -7,6 +7,80 @@ from scipy.optimize import linear_sum_assignment
 import numpy as np
 from collections import deque
 
+
+def is_tile_passable(x, y, sensor_mask, tile_type_map, known_asteroids):
+    if (x, y) in known_asteroids:
+        return False
+    if sensor_mask[x, y]:
+        tile_type = tile_type_map[x, y]
+        if tile_type == 2:  # asteroid
+            return False
+        else:
+            return True
+    else:
+        # Unknown tile, assume passable
+        return True
+
+
+def infer_reward_tiles(last_unit_positions, relic_tile_data, last_team_points, current_points):
+    baseline = 0
+    for (x, y) in last_unit_positions:
+        for relic_pos, tiles_data in relic_tile_data.items():
+            if (x, y) in tiles_data and tiles_data[(x, y)]["reward_tile"]:
+                baseline += 1
+
+    gain = current_points - last_team_points
+    extra = gain - baseline
+    if extra <= 0:
+        return relic_tile_data  # no change
+
+    unknown_occupied = []
+    for (x, y) in last_unit_positions:
+        for relic_pos, tiles_data in relic_tile_data.items():
+            if (x, y) in tiles_data:
+                info = tiles_data[(x, y)]
+                if not info["tested"] and not info["reward_tile"]:
+                    unknown_occupied.append((relic_pos, (x,y)))
+
+    for relic_pos, tile_pos in unknown_occupied[:extra]:
+        relic_tile_data[relic_pos][tile_pos]["reward_tile"] = True
+        relic_tile_data[relic_pos][tile_pos]["tested"] = True
+
+    return relic_tile_data
+
+def bfs_pathfind(map_width, map_height, start, goal, obs, known_asteroids):
+    queue = deque([start])
+    came_from = {start: None}
+
+    while queue:
+        current = queue.popleft()
+        if current == goal:
+            # Reconstruct path
+            path = []
+            while current is not None:
+                path.append(current)
+                current = came_from[current]
+            path.reverse()
+            return path
+
+        for n in get_neighbors(current[0], current[1], map_width, map_height, obs, known_asteroids):
+            if n not in came_from:
+                came_from[n] = current
+                queue.append(n)
+
+    return None
+
+def get_neighbors(x, y, map_width, map_height, obs, known_asteroids):
+    directions = [(0,0), (1,0), (-1,0), (0,1), (0,-1)]
+    neighbors = []
+    for dx, dy in directions:
+        nx, ny = x + dx, y + dy
+        if 0 <= nx < map_width and 0 <= ny < map_height:
+            if is_tile_passable(nx, ny, obs["sensor_mask"], obs["sensor_mask"], known_asteroids):
+                neighbors.append((nx, ny))
+    return neighbors
+
+
 class RelicHuntingShootingAgent:
     def __init__(self, player: str, env_cfg) -> None:
         self.player = player
@@ -29,60 +103,7 @@ class RelicHuntingShootingAgent:
         self.end_of_match_printed = False
         self.last_unit_positions = []  # store positions of units from previous turn
 
-    def is_passable_tile(self, x, y, obs):
-        # If we have stored known asteroid locations:
-        if (x, y) in self.known_asteroids:
-            return False
 
-        # Check if tile is within vision
-        sensor_mask = obs["sensor_mask"]
-        if sensor_mask[x, y]:
-            # We can see this tile
-            tile_type = obs["map_features"]["tile_type"][x, y]
-            if tile_type == 2:
-                # It's an asteroid, store it and return False
-                self.known_asteroids.add((x, y))
-                return False
-            else:
-                # Visible and not asteroid
-                return True
-        else:
-            # Can't see this tile, assume passable to allow exploration
-            return True
-
-    def get_neighbors(self, x, y, map_width, map_height, obs):
-        directions = [(0,0), (1,0), (-1,0), (0,1), (0,-1)]
-        neighbors = []
-        for dx, dy in directions:
-            nx, ny = x + dx, y + dy
-            if 0 <= nx < map_width and 0 <= ny < map_height:
-                if self.is_passable_tile(nx, ny, obs):
-                    neighbors.append((nx, ny))
-        return neighbors
-
-    def bfs_pathfind(self, start, goal, obs):
-        map_width = self.env_cfg["map_width"]
-        map_height = self.env_cfg["map_height"]
-        queue = deque([start])
-        came_from = {start: None}
-
-        while queue:
-            current = queue.popleft()
-            if current == goal:
-                # Reconstruct path
-                path = []
-                while current is not None:
-                    path.append(current)
-                    current = came_from[current]
-                path.reverse()
-                return path
-
-            for n in self.get_neighbors(current[0], current[1], map_width, map_height, obs):
-                if n not in came_from:
-                    came_from[n] = current
-                    queue.append(n)
-
-        return None
 
     def simple_heuristic_move(self, from_pos, to_pos):
         # Move in direction that reduces Manhattan distance
@@ -110,7 +131,7 @@ class RelicHuntingShootingAgent:
     def get_direction_via_pathfinding(self, from_pos, to_pos, obs):
         if from_pos == to_pos:
             return 0  # Already at target
-        path = self.bfs_pathfind(from_pos, to_pos, obs)
+        path = bfs_pathfind(self.env_cfg["map_width"], self.env_cfg["map_height"], from_pos, to_pos, obs, self.known_asteroids)
         if path is None or len(path) < 2:
             # BFS failed: fallback to simple heuristic
             return self.simple_heuristic_move(from_pos, to_pos)
