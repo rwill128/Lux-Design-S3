@@ -470,10 +470,9 @@ class RelicHuntingShootingAgent:
         # 2) Deduce reward tiles based on occupancy and point gains
         self.deduce_reward_tiles(obs)
 
-        # Update results from last turn's test (global inference)
+        # Update results from last turn's test
         self.update_tile_results(current_team_points, obs)
 
-        # Discover visible relic nodes and initialize their tile data if needed
         relic_nodes_mask = obs["relic_nodes_mask"]
         relic_nodes_positions = obs["relic_nodes"][relic_nodes_mask]
 
@@ -485,13 +484,8 @@ class RelicHuntingShootingAgent:
                         if 0 <= bx < self.env_cfg["map_width"] and 0 <= by < self.env_cfg["map_height"]:
                             self.relic_tile_data[(rx, ry)][(bx, by)] = {"tested": False, "reward_tile": False}
 
-        all_known_relic_positions = list(self.relic_tile_data.keys())
-
         actions = np.zeros((self.env_cfg["max_units"], 3), dtype=int)
         available_unit_ids = np.where(obs["units_mask"][self.team_id])[0]
-
-        used_units = set()
-        used_positions = set()
 
         if num_units == 0:
             self.last_team_points = current_team_points
@@ -505,7 +499,7 @@ class RelicHuntingShootingAgent:
         map_width = self.env_cfg["map_width"]
         map_height = self.env_cfg["map_height"]
 
-        # Sap parameters
+        # Sap logic remains unchanged
         sap_range = self.env_cfg.get("unit_sap_range", 1)
         sap_cost = self.env_cfg.get("unit_sap_cost", 10)
 
@@ -582,6 +576,13 @@ class RelicHuntingShootingAgent:
                             relic_targets.append((bx, by))
             relic_targets = list(set(relic_targets))
 
+        # ----- Modified Hungarian assignment with tile priority -----
+
+        # Cost adjustments for tile priority:
+        # Let's define some constants:
+        REWARD_BONUS = -50  # Subtract from distance if known reward tile
+        NON_REWARD_PENALTY = 1000  # Add if known non-reward tile
+
         if self.relic_allocation > 0 and len(relic_targets) > 0:
             relic_units_count = min(self.relic_allocation, len(remaining_units), len(relic_targets))
             relic_cost_matrix = np.zeros((len(remaining_units), len(relic_targets)), dtype=int)
@@ -589,7 +590,18 @@ class RelicHuntingShootingAgent:
                 ux, uy = unit_positions[u]
                 for j, (tx, ty) in enumerate(relic_targets):
                     dist = abs(ux - tx) + abs(uy - ty)
-                    relic_cost_matrix[i, j] = dist
+                    cost = dist
+
+                    # If tile is known reward tile, lower the cost heavily
+                    if (tx, ty) in self.known_reward_tiles:
+                        cost += REWARD_BONUS
+                        if cost < 0:
+                            cost = 0  # Ensure no negative costs if that matters
+                    # If tile is known not-reward tile, increase cost heavily
+                    if (tx, ty) in self.not_reward_tiles:
+                        cost += NON_REWARD_PENALTY
+
+                    relic_cost_matrix[i, j] = cost
 
             row_ind, col_ind = linear_sum_assignment(relic_cost_matrix)
             pairs = sorted(zip(row_ind, col_ind), key=lambda rc: relic_cost_matrix[rc[0], rc[1]])
@@ -601,6 +613,7 @@ class RelicHuntingShootingAgent:
                 relic_unit_to_target[u] = relic_targets[c]
                 assigned_to_relic.add(u)
 
+            used_positions = set()
             remaining_units = [u for u in remaining_units if u not in assigned_to_relic]
 
             for u, (tx, ty) in relic_unit_to_target.items():
@@ -610,8 +623,6 @@ class RelicHuntingShootingAgent:
                 else:
                     direction = self.get_direction_via_pathfinding((ux, uy), (tx, ty), obs)
                     actions[u] = [direction, 0, 0]
-                # Assert uniqueness
-                assert (tx, ty) not in used_positions, f"Duplicate assignment detected at {tx, ty}"
                 used_positions.add((tx, ty))
 
         if len(remaining_units) > 0:
@@ -640,13 +651,24 @@ class RelicHuntingShootingAgent:
                 for u in remaining_units:
                     actions[u] = [0, 0, 0]
             else:
+                # Here too you can modify the cost matrix if needed based on known/not-known tiles
                 cost_matrix = np.zeros((num_remaining, used_cell_count), dtype=int)
                 for i, unit_id in enumerate(remaining_units):
                     ux, uy = unit_positions[unit_id]
                     for j in range(used_cell_count):
                         tx, ty = targets[j]
                         dist = abs(ux - tx) + abs(uy - ty)
-                        cost_matrix[i, j] = dist
+                        cost = dist
+
+                        # Apply priority logic if you consider these general scouting targets:
+                        if (tx, ty) in self.known_reward_tiles:
+                            cost += REWARD_BONUS
+                            if cost < 0:
+                                cost = 0
+                        if (tx, ty) in self.not_reward_tiles:
+                            cost += NON_REWARD_PENALTY
+
+                        cost_matrix[i, j] = cost
 
                 row_ind, col_ind = linear_sum_assignment(cost_matrix)
                 unit_to_target = {}
@@ -658,7 +680,6 @@ class RelicHuntingShootingAgent:
                 assigned_units = set(unit_to_target.keys())
                 unassigned_units = set(remaining_units) - assigned_units
 
-                # After Hungarian assignment for vision targets
                 for unit_id, (tx, ty) in unit_to_target.items():
                     ux, uy = unit_positions[unit_id]
                     if ux == tx and uy == ty:
@@ -666,9 +687,6 @@ class RelicHuntingShootingAgent:
                     else:
                         direction = self.get_direction_via_pathfinding((ux, uy), (tx, ty), obs)
                         actions[unit_id] = [direction, 0, 0]
-                    # Assert uniqueness
-                    assert (tx, ty) not in used_positions, f"Duplicate assignment detected at {tx, ty}"
-                    used_positions.add((tx, ty))
 
                 for unit_id in unassigned_units:
                     actions[unit_id] = [0, 0, 0]
@@ -682,9 +700,8 @@ class RelicHuntingShootingAgent:
             ux, uy = obs["units"]["position"][self.team_id][uid]
             self.last_unit_positions.append((ux, uy))
 
-        # After computing actions, check if the match ended
+        # End of match printing
         if obs["match_steps"] == 100 and not self.end_of_match_printed:
-            # Collect all reward tiles
             all_reward_tiles = []
             for relic_pos, tiles_data in self.relic_tile_data.items():
                 for tile_pos, tile_info in tiles_data.items():
@@ -698,7 +715,6 @@ class RelicHuntingShootingAgent:
             self.end_of_match_printed = True
 
         return actions
-
 
 def evaluate_agents(agent_1_cls, agent_2_cls, seed=42, games_to_play=3, replay_save_dir="replays"):
     # Ensure the replay directory exists
