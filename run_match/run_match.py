@@ -358,10 +358,14 @@ class RelicHuntingShootingAgent:
         return reward_tiles, untested_tiles
 
     def deduce_reward_tiles(self, obs):
-        # ... unchanged ...
-        current_team_points = obs["team_points"][self.team_id].item() if np.isscalar(obs["team_points"][self.team_id]) else obs["team_points"][self.team_id]
+        # Current points
+        current_team_points = obs["team_points"][self.team_id]
+        # If current_team_points is a scalar array, convert to python int
+        if hasattr(current_team_points, 'item'):
+            current_team_points = current_team_points.item()
         gain = current_team_points - self.last_team_points
 
+        # Occupied unknown tiles this turn
         unit_positions = obs["units"]["position"][self.team_id]
         unit_mask = obs["units_mask"][self.team_id].astype(bool)
         occupied_this_turn = set()
@@ -370,20 +374,63 @@ class RelicHuntingShootingAgent:
             if (x,y) in self.unknown_tiles:
                 occupied_this_turn.add((x,y))
 
+        # Determine if gain rate went down compared to last turn's gain
+        last_gain = getattr(self, 'last_gain', 0)  # if not set, assume 0 from previous turn
+        gain_drop = gain < last_gain
+
+        # Case 1: No or Negative Gain
         if gain <= 0:
+            # No point gain means no unknown tile contributed points this turn
+            # Thus all unknown tiles occupied last turn are not reward
             self.not_reward_tiles.update(self.last_unknown_occupied)
+            # If currently occupied unknown tiles were also occupied last turn with no gain,
+            # they are also not reward
             self.not_reward_tiles.update(occupied_this_turn.intersection(self.last_unknown_occupied))
             self.unknown_tiles -= self.not_reward_tiles
+
         else:
+            # gain > 0
             newly_occupied = occupied_this_turn - self.last_unknown_occupied
             if len(newly_occupied) == 1:
+                # Exactly one new tile caused the gain
                 self.known_reward_tiles.update(newly_occupied)
                 self.unknown_tiles -= newly_occupied
+            elif len(newly_occupied) > 1:
+                # More than one new unknown tile is occupied, can't deduce which is reward
+                pass
             else:
+                # gain > 0 but no new tiles were occupied?
+                # This should not happen if our logic relies on new occupancy for gain
+                pass
+                # assert False, "Points went up but no new unknown tile was occupied."
+
+        # Additional logic: If gain rate dropped compared to last turn
+        if gain_drop:
+            # We had fewer points gained this turn than last turn
+            # This suggests we lost a reward tile occupant
+            # Tiles that were occupied last turn but not this turn:
+            newly_unoccupied = self.last_unknown_occupied - occupied_this_turn
+            if len(newly_unoccupied) == 1:
+                # Exactly one tile was vacated and gain rate dropped
+                # That tile must have been a reward tile that we lost
+                self.known_reward_tiles.update(newly_unoccupied)
+                self.unknown_tiles -= newly_unoccupied
+            elif len(newly_unoccupied) > 1:
+                # More than one tile vacated - can't deduce which one caused the drop
                 pass
 
+        # Update tracking
         self.last_unknown_occupied = occupied_this_turn
         self.last_team_points = current_team_points
+        self.last_gain = gain  # Store current gain for next turn
+
+        # Print current categorization results
+        print("Possible Tiles:", len(self.possible_reward_tiles))
+        print("Unknown Tiles:", len(self.unknown_tiles))
+        print("Not Reward Tiles:", len(self.not_reward_tiles))
+        print("Known Reward Tiles:", len(self.known_reward_tiles))
+        if len(self.known_reward_tiles) > 0:
+            print("Known Rewards:", self.known_reward_tiles)
 
     def update_possible_reward_tiles(self, obs):
         # ... unchanged ...
