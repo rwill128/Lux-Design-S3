@@ -231,7 +231,7 @@ class RelicHuntingShootingAgent:
                 self.current_tester_tile_relic = (rx, ry)
                 # Expected baseline gain is the sum of currently known reward tiles occupied
                 self.expected_baseline_gain = len(reward_tiles)
-                break
+                # break
 
         if num_units == 0:
             self.last_team_points = current_team_points
