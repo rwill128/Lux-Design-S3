@@ -181,41 +181,50 @@ class RelicHuntingShootingAgent:
         available_unit_ids = np.where(obs["units_mask"][self.team_id])[0]
 
         used_units = set()
-        for (rx, ry) in all_known_relic_positions:
-            reward_tiles, untested_tiles = self.select_tiles_for_relic((rx, ry))
-            # Place units on known reward tiles first
-            for tile in reward_tiles:
-                if len(available_unit_ids) == 0:
-                    break
-                u = available_unit_ids[0]
-                available_unit_ids = available_unit_ids[1:]
-                ux, uy = obs["units"]["position"][self.team_id][u]
-                tx, ty = tile
-                if (ux, uy) != (tx, ty):
-                    direction = self.get_direction_via_pathfinding((ux, uy), (tx, ty), obs)
-                    actions[u] = [direction, 0, 0]
-                else:
-                    actions[u] = [0,0,0]
-                used_units.add(u)
-
-            # Test an untested tile if available and units remain
-            if untested_tiles and len(available_unit_ids) > 0:
-                test_tile = untested_tiles[0]
-                u = available_unit_ids[0]
-                available_unit_ids = available_unit_ids[1:]
-                ux, uy = obs["units"]["position"][self.team_id][u]
-                tx, ty = test_tile
-                if (ux, uy) != (tx, ty):
-                    direction = self.get_direction_via_pathfinding((ux, uy), (tx, ty), obs)
-                    actions[u] = [direction, 0, 0]
-                else:
-                    actions[u] = [0,0,0]
-                used_units.add(u)
-                self.current_tester_tile = test_tile
-                self.current_tester_tile_relic = (rx, ry)
-                # Expected baseline gain is the sum of currently known reward tiles occupied
-                self.expected_baseline_gain = len(reward_tiles)
-                break
+        used_positions = set()
+        # for (rx, ry) in all_known_relic_positions:
+        #     reward_tiles, untested_tiles = self.select_tiles_for_relic((rx, ry))
+        #     # Place units on known reward tiles first
+        #     for tile in reward_tiles:
+        #         if len(available_unit_ids) == 0:
+        #             break
+        #         u = available_unit_ids[0]
+        #         available_unit_ids = available_unit_ids[1:]
+        #         ux, uy = obs["units"]["position"][self.team_id][u]
+        #         tx, ty = tile
+        #         if (ux, uy) != (tx, ty):
+        #             direction = self.get_direction_via_pathfinding((ux, uy), (tx, ty), obs)
+        #             actions[u] = [direction, 0, 0]
+        #         else:
+        #             actions[u] = [0,0,0]
+        #         # Assert unique final assignment for this unit
+        #         # The final position we are trying to achieve is (tx, ty)
+        #         # Ensure no other unit is already assigned here:
+        #         assert (tx, ty) not in used_positions, f"Duplicate assignment detected at {tx, ty}"
+        #         used_positions.add((tx, ty))
+        #         used_units.add(u)
+        #
+        #     # Test an untested tile if available and units remain
+        #     if untested_tiles and len(available_unit_ids) > 0:
+        #         test_tile = untested_tiles[0]
+        #         u = available_unit_ids[0]
+        #         available_unit_ids = available_unit_ids[1:]
+        #         ux, uy = obs["units"]["position"][self.team_id][u]
+        #         tx, ty = test_tile
+        #         if (ux, uy) != (tx, ty):
+        #             direction = self.get_direction_via_pathfinding((ux, uy), (tx, ty), obs)
+        #             actions[u] = [direction, 0, 0]
+        #         else:
+        #             actions[u] = [0,0,0]
+        #         # Assert unique final assignment
+        #         assert (tx, ty) not in used_positions, f"Duplicate assignment detected at {tx, ty}"
+        #         used_positions.add((tx, ty))
+        #
+        #         used_units.add(u)
+        #         self.current_tester_tile = test_tile
+        #         self.current_tester_tile_relic = (rx, ry)
+        #         self.expected_baseline_gain = len(reward_tiles)
+        #         break
 
         if num_units == 0:
             self.last_team_points = current_team_points
@@ -334,6 +343,9 @@ class RelicHuntingShootingAgent:
                 else:
                     direction = self.get_direction_via_pathfinding((ux, uy), (tx, ty), obs)
                     actions[u] = [direction, 0, 0]
+                # Assert uniqueness
+                assert (tx, ty) not in used_positions, f"Duplicate assignment detected at {tx, ty}"
+                used_positions.add((tx, ty))
 
         if len(remaining_units) > 0:
             still_num_units = len(remaining_units)
@@ -379,6 +391,7 @@ class RelicHuntingShootingAgent:
                 assigned_units = set(unit_to_target.keys())
                 unassigned_units = set(remaining_units) - assigned_units
 
+                # After Hungarian assignment for vision targets
                 for unit_id, (tx, ty) in unit_to_target.items():
                     ux, uy = unit_positions[unit_id]
                     if ux == tx and uy == ty:
@@ -386,6 +399,9 @@ class RelicHuntingShootingAgent:
                     else:
                         direction = self.get_direction_via_pathfinding((ux, uy), (tx, ty), obs)
                         actions[unit_id] = [direction, 0, 0]
+                    # Assert uniqueness
+                    assert (tx, ty) not in used_positions, f"Duplicate assignment detected at {tx, ty}"
+                    used_positions.add((tx, ty))
 
                 for unit_id in unassigned_units:
                     actions[unit_id] = [0, 0, 0]
@@ -413,38 +429,6 @@ class RelicHuntingShootingAgent:
                 print(f"Relic: {relic_pos}, Reward Tile: {tile_pos}")
 
             self.end_of_match_printed = True
-
-        # After all assignments are done but before returning actions
-        final_positions = {}
-        for u in range(self.env_cfg["max_units"]):
-            direction = actions[u][0]
-            if direction == 0:
-                # Unit stays in place
-                final_pos = tuple(unit_positions[u])
-            else:
-                ux, uy = unit_positions[u]
-                if direction == 1:  # UP
-                    final_pos = (ux, uy - 1)
-                elif direction == 2: # RIGHT
-                    final_pos = (ux + 1, uy)
-                elif direction == 3: # DOWN
-                    final_pos = (ux, uy + 1)
-                elif direction == 4: # LEFT
-                    final_pos = (ux - 1, uy)
-                else:
-                    # Sap action (5) or any other action doesn't move the unit
-                    # If sap action doesn't move unit, final_pos = current pos
-                    # Adjust if needed.
-                    if direction == 5:
-                        final_pos = tuple(unit_positions[u])
-                    else:
-                        final_pos = tuple(unit_positions[u])
-
-            if final_pos in final_positions:
-                # Another unit is already moving here, let's force this unit to stay put
-                actions[u] = [0,0,0]
-            else:
-                final_positions[final_pos] = u
 
         return actions
 
