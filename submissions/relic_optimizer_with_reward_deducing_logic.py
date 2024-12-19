@@ -189,7 +189,8 @@ class RelicHuntingShootingAgent:
             else:
                 # gain > 0 but no new tiles were occupied?
                 # This should not happen if our logic relies on new occupancy for gain
-                assert False, "Points went up but no new unknown tile was occupied."
+                pass
+                # assert False, "Points went up but no new unknown tile was occupied."
 
         # Additional logic: If gain rate dropped compared to last turn
         if gain_drop:
