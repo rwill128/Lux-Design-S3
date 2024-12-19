@@ -10,212 +10,6 @@ import numpy as np
 from scipy.optimize import linear_sum_assignment
 import math
 
-class PointLocator:
-    def __init__(self, player: str, env_cfg) -> None:
-        self.player = player
-        self.opp_player = "player_1" if player == "player_0" else "player_0"
-        self.team_id = 0 if player == "player_0" else 1
-        self.opp_team_id = 1 if self.team_id == 0 else 0
-        np.random.seed(0)
-        self.env_cfg = env_cfg
-
-        # For testing reward-tile deduction
-        self.last_team_points = 0
-        self.possible_reward_tiles = set()
-        self.unknown_tiles = set()         # tiles in possible_reward_tiles currently unknown
-        self.not_reward_tiles = set()
-        self.known_reward_tiles = set()
-
-        self.last_unknown_occupied = set() # which unknown tiles were occupied last turn
-        self.last_unit_positions = []
-        self.end_of_match_printed = False
-
-    def update_possible_reward_tiles(self, obs):
-        # Build the union set of possible reward tiles from all known relics
-        relic_nodes_mask = obs["relic_nodes_mask"]
-        relic_nodes = obs["relic_nodes"][relic_nodes_mask]
-
-        new_possible = set()
-        block_radius = 2
-        map_width = self.env_cfg["map_width"]
-        map_height = self.env_cfg["map_height"]
-        for (rx, ry) in relic_nodes:
-            for bx in range(rx - block_radius, rx + block_radius + 1):
-                for by in range(ry - block_radius, ry + block_radius + 1):
-                    if 0 <= bx < map_width and 0 <= by < map_height:
-                        new_possible.add((bx, by))
-
-        # Merge with existing sets
-        # Tiles that become non-possible (no relic around) remain if they were known reward?
-        # For simplicity, just keep union each turn as stable.
-        self.possible_reward_tiles = new_possible
-        # Any tiles we haven't categorized yet remain unknown unless already known or not-reward
-        # Remove known/not-reward from unknown
-        currently_unknown = self.possible_reward_tiles - self.known_reward_tiles - self.not_reward_tiles
-        self.unknown_tiles = currently_unknown
-
-    def deduce_reward_tiles(self, obs):
-        # Deduction logic:
-        current_team_points = obs["team_points"][self.team_id].item() if np.isscalar(obs["team_points"][self.team_id]) else obs["team_points"][self.team_id]
-        gain = current_team_points - self.last_team_points
-
-        # Occupied unknown tiles this turn
-        unit_positions = obs["units"]["position"][self.team_id]
-        unit_mask = obs["units_mask"][self.team_id].astype(bool)
-        occupied_this_turn = set()
-        for uid in np.where(unit_mask)[0]:
-            x,y = unit_positions[uid]
-            if (x,y) in self.unknown_tiles:
-                occupied_this_turn.add((x,y))
-
-        # Compare occupied sets:
-        # If gain <= 0 (no increase in points):
-        #    all currently or previously occupied unknown tiles from last turn are not reward
-        if gain <= 0:
-            # No point gain means no unknown tile that was occupied contributed points
-            # Thus all unknown tiles that were occupied last turn can become not-reward:
-            self.not_reward_tiles.update(self.last_unknown_occupied)
-            # Also, if currently occupied unknown tiles were also occupied last turn, still no gain -> not reward
-            self.not_reward_tiles.update(occupied_this_turn.intersection(self.last_unknown_occupied))
-            # Remove them from unknown
-            self.unknown_tiles -= self.not_reward_tiles
-
-        else:
-            # gain > 0
-            # If exactly one new unknown tile was occupied this turn (and wasn't last turn), that tile is known reward
-            newly_occupied = occupied_this_turn - self.last_unknown_occupied
-            if len(newly_occupied) == 1:
-                # Exactly one new tile caused gain
-                self.known_reward_tiles.update(newly_occupied)
-                self.unknown_tiles -= newly_occupied
-            elif len(newly_occupied) > 1:
-                # More than one new unknown tile is occupied, we cannot deduce which one caused the gain
-                # They remain unknown
-                pass
-            else:
-                # gain > 0 but no new tiles were occupied this turn?
-                # This should not happen if we rely on new occupancy for gain
-                # Let's assert as you mentioned
-                pass
-                # assert False, "Points went up but no new unknown tile was occupied."
-
-        # Update last turn data
-        self.last_unknown_occupied = occupied_this_turn
-        self.last_team_points = current_team_points
-
-        # Print current categorization results
-        print("\nTime step:", str(obs["steps"]))
-        print("Possible Tiles:", len(self.possible_reward_tiles))
-        print("Unknown Tiles:", len(self.unknown_tiles))
-        print("Not Reward Tiles:", len(self.not_reward_tiles))
-        print("Known Reward Tiles:", len(self.known_reward_tiles))
-        if len(self.known_reward_tiles) > 0:
-            print("Known Rewards:", self.known_reward_tiles)
-
-    def simple_sap(self, obs, actions, available_unit_ids):
-        # Very simplified sapping logic
-        # Just pick a random direction to sap if energy > threshold
-        unit_positions = obs["units"]["position"][self.team_id]
-        unit_energy = obs["units"]["energy"][self.team_id]
-        map_width = self.env_cfg["map_width"]
-        map_height = self.env_cfg["map_height"]
-
-        sap_cost = self.env_cfg.get("unit_sap_cost", 10)
-        sap_range = self.env_cfg.get("unit_sap_range", 1)
-
-        done = set()
-        for u in available_unit_ids:
-            ux, uy = unit_positions[u]
-            ue = unit_energy[u]
-            if ue > sap_cost:
-                # Try sapping down direction if possible
-                tx, ty = ux, uy+1
-                if 0 <= tx < map_width and 0 <= ty < map_height:
-                    actions[u] = [5, 0, 1]  # sap down
-                    done.add(u)
-        return done
-
-    def simple_hungarian_assignment(self, obs, actions, remaining_units):
-        # Assign units to random points in the map (or a grid) using Hungarian just for demonstration
-        # We'll create some random targets equal to number of units
-        map_width = self.env_cfg["map_width"]
-        map_height = self.env_cfg["map_height"]
-        unit_positions = obs["units"]["position"][self.team_id]
-
-        num_targets = len(remaining_units)
-        if num_targets == 0:
-            return
-
-        targets = []
-        # Just pick random targets for demonstration
-        # In a real scenario, you'd pick relic targets or vision targets
-        for i in range(num_targets):
-            x = np.random.randint(0, map_width)
-            y = np.random.randint(0, map_height)
-            targets.append((x,y))
-
-        cost_matrix = np.zeros((len(remaining_units), num_targets), dtype=int)
-        for i,u in enumerate(remaining_units):
-            ux,uy = unit_positions[u]
-            for j,(tx,ty) in enumerate(targets):
-                cost_matrix[i,j] = abs(ux - tx) + abs(uy - ty)
-
-        row_ind, col_ind = linear_sum_assignment(cost_matrix)
-        for r,c in zip(row_ind,col_ind):
-            u = remaining_units[r]
-            ux,uy = unit_positions[u]
-            tx,ty = targets[c]
-            if (ux,uy) == (tx,ty):
-                actions[u] = [0,0,0]
-            else:
-                direction = self.simple_heuristic_move((ux,uy),(tx,ty))
-                actions[u] = [direction,0,0]
-
-    def simple_heuristic_move(self, from_pos, to_pos):
-        # Move in direction that reduces Manhattan distance
-        (fx, fy) = from_pos
-        (tx, ty) = to_pos
-        dx = tx - fx
-        dy = ty - fy
-        # Prioritize the axis with greatest distance
-        if abs(dx) > abs(dy):
-            return 2 if dx > 0 else 4  # move right or left
-        else:
-            return 3 if dy > 0 else 1  # move down or up
-
-
-    def act(self, step: int, obs, remainingOverageTime: int = 60):
-        unit_mask = np.array(obs["units_mask"][self.team_id])
-        unit_positions = np.array(obs["units"]["position"][self.team_id])
-        actions = np.zeros((self.env_cfg["max_units"], 3), dtype=int)
-
-        # 1) Update possible reward tiles
-        self.update_possible_reward_tiles(obs)
-
-        # 2) Deduce reward tiles based on occupancy and point gains
-        self.deduce_reward_tiles(obs)
-
-        # Perform sapping
-        available_unit_ids = np.where(unit_mask)[0]
-        sap_done = self.simple_sap(obs, actions, available_unit_ids)
-
-        # Hungarian assignment for the rest
-        remaining_units = [u for u in available_unit_ids if u not in sap_done]
-        self.simple_hungarian_assignment(obs, actions, remaining_units)
-
-        # Update last positions
-        self.last_unit_positions = []
-        for uid in np.where(unit_mask)[0]:
-            ux, uy = unit_positions[uid]
-            self.last_unit_positions.append((ux, uy))
-
-        # End of match check
-        if obs["match_steps"] == 100 and not self.end_of_match_printed:
-            print("End of match known reward tiles:", self.known_reward_tiles)
-            self.end_of_match_printed = True
-
-        return actions
-
 
 class RelicHuntingShootingAgent:
     def __init__(self, player: str, env_cfg) -> None:
@@ -241,7 +35,7 @@ class RelicHuntingShootingAgent:
         self.unknown_tiles = set()
         self.not_reward_tiles = set()
         self.known_reward_tiles = set()
-
+        self.last_gain = 0
         self.last_unknown_occupied = set()
 
         # New attribute to store known relic locations across games
@@ -564,7 +358,7 @@ class RelicHuntingShootingAgent:
                 self.last_unit_positions.append((ux, uy))
             return actions
 
-        relic_targets = self.known_relic_positions
+        relic_targets = list(self.known_relic_positions)
         if len(relics) > 0:
             block_radius = 2
             for (rx, ry) in relics:
@@ -573,6 +367,8 @@ class RelicHuntingShootingAgent:
                         if 0 <= bx < map_width and 0 <= by < map_height:
                             relic_targets.append((bx, by))
             relic_targets = list(set(relic_targets))
+
+        relic_targets = list(set(list(set(relic_targets) - set(self.not_reward_tiles)) + list(self.known_reward_tiles)))
 
         # Prioritization constants
         REWARD_BONUS = -50
