@@ -166,10 +166,10 @@ class RelicHuntingShootingAgent:
 
         # Determine if gain rate went down compared to last turn's gain
         last_gain = getattr(self, 'last_gain', 0)  # if not set, assume 0 from previous turn
-        gain_drop = gain < last_gain
+        gain_rate = gain - last_gain
 
-        # Case 1: No or Negative Gain
-        if gain <= 0:
+        # We have the same number of reward squares
+        if gain_rate == 0:
             # No point gain means no unknown tile contributed points this turn
             # Thus all unknown tiles occupied last turn are not reward
             self.not_reward_tiles.update(self.last_unknown_occupied)
@@ -178,8 +178,8 @@ class RelicHuntingShootingAgent:
             self.not_reward_tiles.update(occupied_this_turn.intersection(self.last_unknown_occupied))
             self.unknown_tiles -= self.not_reward_tiles
 
-        else:
-            # gain > 0
+        elif gain_rate > 0:
+            # We entered a new reward square
             newly_occupied = occupied_this_turn - self.last_unknown_occupied
             if len(newly_occupied) == 1:
                 # Exactly one new tile caused the gain
@@ -194,8 +194,8 @@ class RelicHuntingShootingAgent:
                 # pass
                 assert False, "Points went up but no new unknown tile was occupied."
 
-        # Additional logic: If gain rate dropped compared to last turn
-        if gain_drop:
+        # We have fewer reward squares
+        if gain_rate < 0:
             # We had fewer points gained this turn than last turn
             # This suggests we lost a reward tile occupant
             # Tiles that were occupied last turn but not this turn:
@@ -209,6 +209,7 @@ class RelicHuntingShootingAgent:
                 # More than one tile vacated - can't deduce which one caused the drop
                 pass
             elif len(newly_unoccupied) == 0:
+                # pass
                 assert False, "We lost points but we don't have any newly unoccupied tiles?"
 
         # Update tracking
@@ -230,12 +231,12 @@ class RelicHuntingShootingAgent:
         relic_nodes = obs["relic_nodes"][relic_nodes_mask]
 
         new_possible = set()
-        block_radius = 2
+        block_radius = 4
         map_width = self.env_cfg["map_width"]
         map_height = self.env_cfg["map_height"]
         for (rx, ry) in relic_nodes:
-            for bx in range(rx - block_radius, rx + block_radius + 1):
-                for by in range(ry - block_radius, ry + block_radius + 1):
+            for bx in range(rx - block_radius, rx + block_radius):
+                for by in range(ry - block_radius, ry + block_radius):
                     if 0 <= bx < map_width and 0 <= by < map_height:
                         new_possible.add((bx, by))
 
