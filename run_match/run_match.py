@@ -191,8 +191,8 @@ class RelicHuntingShootingAgent:
             else:
                 # gain > 0 but no new tiles were occupied?
                 # This should not happen if our logic relies on new occupancy for gain
-                pass
-                # assert False, "Points went up but no new unknown tile was occupied."
+                # pass
+                assert False, "Points went up but no new unknown tile was occupied."
 
         # Additional logic: If gain rate dropped compared to last turn
         if gain_drop:
@@ -208,6 +208,8 @@ class RelicHuntingShootingAgent:
             elif len(newly_unoccupied) > 1:
                 # More than one tile vacated - can't deduce which one caused the drop
                 pass
+            elif len(newly_unoccupied) == 0:
+                assert False, "We lost points but we don't have any newly unoccupied tiles?"
 
         # Update tracking
         self.last_unknown_occupied = occupied_this_turn
