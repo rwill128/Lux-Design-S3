@@ -4,6 +4,7 @@ from lux.kit import from_json
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
+
 class BestAgentAttacker:
     def __init__(self, player: str, env_cfg) -> None:
         self.player = player
@@ -88,9 +89,9 @@ class BestAgentAttacker:
         unit_mask = obs["units_mask"][self.team_id].astype(bool)
         occupied_this_turn = set()
         for uid in np.where(unit_mask)[0]:
-            x,y = unit_positions[uid]
-            if (x,y) in self.unknown_tiles:
-                occupied_this_turn.add((x,y))
+            x, y = unit_positions[uid]
+            if (x, y) in self.unknown_tiles:
+                occupied_this_turn.add((x, y))
 
         # Compute currently occupied known reward tiles
         currently_reward_occupied = set()
@@ -156,7 +157,6 @@ class BestAgentAttacker:
             # Tiles that were occupied last turn but not this turn:
             newly_occupied = occupied_this_turn - self.last_unknown_occupied
             if len(newly_occupied) == 1 and len(self.newly_unoccupied_known) == 0:
-
                 # This isn't working correctly
                 # For now it's degrading bot performance in subsequent rounds because we're doing a
                 # pretty good job of finding reward tiles the first round and then marking them as non-reward incorrectly
@@ -250,8 +250,8 @@ class BestAgentAttacker:
                 continue  # Already found a better path
 
             (cx, cy) = current
-            for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
-                nx, ny = cx+dx, cy+dy
+            for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+                nx, ny = cx + dx, cy + dy
                 if 0 <= nx < map_width and 0 <= ny < map_height and is_passable(nx, ny):
                     # Calculate the step cost using tile energy
                     tile_cost = 10 - tile_energy_map[nx, ny]
@@ -286,7 +286,7 @@ class BestAgentAttacker:
         map_width = self.env_cfg["map_width"]
         map_height = self.env_cfg["map_height"]
 
-        opp_visible_mask = (opp_positions[:,0] != -1) & (opp_positions[:,1] != -1)
+        opp_visible_mask = (opp_positions[:, 0] != -1) & (opp_positions[:, 1] != -1)
         visible_opp_ids = np.where(opp_visible_mask)[0]
 
         enemy_positions = {}
@@ -313,7 +313,6 @@ class BestAgentAttacker:
                                                                                       obs, remaining_units,
                                                                                       unit_positions)
 
-
         if max(obs['team_wins']) <= 0:
             self.send_to_explore_if_not_going_to_relic(NON_REWARD_PENALTY, REWARD_BONUS, actions, map_height, map_width,
                                                        obs, remaining_units, unit_positions)
@@ -321,7 +320,6 @@ class BestAgentAttacker:
             # This is where I'd like to attack instead.
             self.send_to_attack_if_not_going_to_relic(NON_REWARD_PENALTY, REWARD_BONUS, actions, map_height, map_width,
                                                       obs, remaining_units, unit_positions)
-
 
         # If the match ended, print known relic positions and reward tiles
         # Do not clear self.known_relic_positions here, so it's usable next game
@@ -393,7 +391,7 @@ class BestAgentAttacker:
         # If enemy is top-left, do the opposite. We'll just center around enemy_corner_x, enemy_corner_y.
         # Let's say we form a grid around that corner within some offset.
         offset_x = max(map_width // 4, 1)  # a quarter of the map width
-        offset_y = max(map_height // 4, 1) # a quarter of the map height
+        offset_y = max(map_height // 4, 1)  # a quarter of the map height
 
         # Based on where the enemy corner is, define a bounding rectangle for targets.
         # If enemy is bottom-right corner:
@@ -480,7 +478,6 @@ class BestAgentAttacker:
         # Any unassigned units can idle
         for unit_id in unassigned_units:
             actions[unit_id] = [0, 0, 0]
-
 
     def send_to_explore_if_not_going_to_relic(self, NON_REWARD_PENALTY, REWARD_BONUS, actions, map_height, map_width,
                                               obs, remaining_units, unit_positions):
@@ -753,8 +750,10 @@ class BestAgentAttacker:
 
 
 ### DO NOT REMOVE THE FOLLOWING CODE ###
-agent_dict = dict() # store potentially multiple dictionaries as kaggle imports code directly
+agent_dict = dict()  # store potentially multiple dictionaries as kaggle imports code directly
 agent_prev_obs = dict()
+
+
 def agent_fn(observation, configurations):
     """
     agent definition for kaggle submission.
@@ -771,6 +770,8 @@ def agent_fn(observation, configurations):
     agent = agent_dict[player]
     actions = agent.act(step, from_json(obs), remainingOverageTime)
     return dict(action=actions.tolist())
+
+
 if __name__ == "__main__":
 
     def read_input():
@@ -781,6 +782,8 @@ if __name__ == "__main__":
             return input()
         except EOFError as eof:
             raise SystemExit(eof)
+
+
     step = 0
     player_id = 0
     env_cfg = None
@@ -788,7 +791,9 @@ if __name__ == "__main__":
     while True:
         inputs = read_input()
         raw_input = json.loads(inputs)
-        observation = Namespace(**dict(step=raw_input["step"], obs=raw_input["obs"], remainingOverageTime=raw_input["remainingOverageTime"], player=raw_input["player"], info=raw_input["info"]))
+        observation = Namespace(
+            **dict(step=raw_input["step"], obs=raw_input["obs"], remainingOverageTime=raw_input["remainingOverageTime"],
+                   player=raw_input["player"], info=raw_input["info"]))
         if i == 0:
             env_cfg = raw_input["info"]["env_cfg"]
             player_id = raw_input["player"]
