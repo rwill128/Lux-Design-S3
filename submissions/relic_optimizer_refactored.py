@@ -423,9 +423,6 @@ class RelicHuntingShootingAgent:
                     if tile_info["reward_tile"]:
                         all_reward_tiles.append((relic_pos, tile_pos))
 
-            print("Known reward tiles at end of match:")
-            for relic_pos, tile_pos in all_reward_tiles:
-                print(f"Relic: {relic_pos}, Reward Tile: {tile_pos}")
 
             self.end_of_match_printed = True
 

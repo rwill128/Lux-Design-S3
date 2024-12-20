@@ -247,13 +247,6 @@ class RelicHuntingShootingAgent:
         self.last_team_points = current_team_points
         self.last_gain = gain  # Store current gain for next turn
 
-        # Print current categorization results
-        print("Possible Tiles:", len(self.possible_reward_tiles))
-        print("Unknown Tiles:", len(self.unknown_tiles))
-        print("Not Reward Tiles:", len(self.not_reward_tiles))
-        print("Known Reward Tiles:", len(self.known_reward_tiles))
-        if len(self.known_reward_tiles) > 0:
-            print("Known Rewards:", self.known_reward_tiles)
 
     def update_possible_reward_tiles(self, obs):
         # ... unchanged ...
@@ -584,11 +577,6 @@ class RelicHuntingShootingAgent:
                 for tile_pos, tile_info in tiles_data.items():
                     if tile_info["reward_tile"]:
                         all_reward_tiles.append((relic_pos, tile_pos))
-
-            print("Known relic positions across games:", self.known_relic_positions)
-            print("Known reward tiles at end of match:")
-            for relic_pos, tile_pos in all_reward_tiles:
-                print(f"Relic: {relic_pos}, Reward Tile: {tile_pos}")
 
             self.end_of_match_printed = True
 
