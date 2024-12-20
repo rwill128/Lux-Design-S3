@@ -203,7 +203,7 @@ class RelicHuntingShootingAgent:
         if gain_rate > 0:
             # We entered a new reward square
             newly_occupied = occupied_this_turn - self.last_unknown_occupied
-            if len(newly_occupied) == 1:
+            if len(newly_occupied) == 1 and len(newly_unoccupied_known) == 0:
                 # Exactly one new tile caused the gain
                 self.known_reward_tiles.update(newly_occupied)
                 self.unknown_tiles -= newly_occupied
@@ -211,7 +211,7 @@ class RelicHuntingShootingAgent:
                 # More than one new unknown tile is occupied, can't deduce which is reward
                 pass
             else:
-                # gain > 0 but no new tiles were occupied?
+                # gain_rate > 0 but no new tiles were occupied?
                 # This should not happen if our logic relies on new occupancy for gain
                 pass
                 # assert False, "Points went up but no new unknown tile was occupied."
@@ -222,7 +222,7 @@ class RelicHuntingShootingAgent:
             # This suggests we lost a reward tile occupant
             # Tiles that were occupied last turn but not this turn:
             newly_occupied = occupied_this_turn - self.last_unknown_occupied
-            if len(newly_occupied) == 1:
+            if len(newly_occupied) == 1 && len(newly_unoccupied_known) == 0:
 
                 # This isn't working correctly
                 # For now it's degrading bot performance in subsequent rounds because we're doing a
@@ -261,7 +261,7 @@ class RelicHuntingShootingAgent:
         relic_nodes = obs["relic_nodes"][relic_nodes_mask]
 
         new_possible = set()
-        block_radius = 4
+        block_radius = 5
         map_width = self.env_cfg["map_width"]
         map_height = self.env_cfg["map_height"]
         for (rx, ry) in relic_nodes:
@@ -436,7 +436,7 @@ class RelicHuntingShootingAgent:
                                     else:
                                         adjacent_count += ccount
 
-                        if center_count > 0 and adjacent_count > 0:
+                        if center_count > 0 and adjacent_count >= 0:
                             actions[unit_id] = [5, dx, dy]
                             sap_done.add(unit_id)
                             found_target = True
