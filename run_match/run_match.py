@@ -169,7 +169,7 @@ class RelicHuntingShootingAgent:
         gain_rate = gain - last_gain
 
         # We have the same number of reward squares
-        if gain_rate == 0:
+        if gain == 0:
             # No point gain means no unknown tile contributed points this turn
             # Thus all unknown tiles occupied last turn are not reward
             self.not_reward_tiles.update(self.last_unknown_occupied)
@@ -178,7 +178,17 @@ class RelicHuntingShootingAgent:
             self.not_reward_tiles.update(occupied_this_turn.intersection(self.last_unknown_occupied))
             self.unknown_tiles -= self.not_reward_tiles
 
-        elif gain_rate > 0:
+        if gain_rate == 9:
+            newly_occupied = occupied_this_turn - self.last_unknown_occupied
+            newly_unoccupied = self.last_unknown_occupied - occupied_this_turn
+
+            if len(newly_occupied) == 1 and len(newly_unoccupied) == 0:
+                self.not_reward_tiles.update(newly_occupied)
+
+            if len(newly_unoccupied) == 1 and len(newly_occupied) == 0:
+                self.not_reward_tiles.update(newly_unoccupied)
+
+        if gain_rate > 0:
             # We entered a new reward square
             newly_occupied = occupied_this_turn - self.last_unknown_occupied
             if len(newly_occupied) == 1:
@@ -199,6 +209,10 @@ class RelicHuntingShootingAgent:
             # We had fewer points gained this turn than last turn
             # This suggests we lost a reward tile occupant
             # Tiles that were occupied last turn but not this turn:
+            newly_occupied = occupied_this_turn - self.last_unknown_occupied
+            if len(newly_occupied) == 1:
+                self.not_reward_tiles.update(newly_occupied)
+
             newly_unoccupied = self.last_unknown_occupied - occupied_this_turn
             if len(newly_unoccupied) == 1:
                 # Exactly one tile was vacated and gain rate dropped
