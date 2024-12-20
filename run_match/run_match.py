@@ -362,9 +362,6 @@ class BestAgent:
 
         opp_positions = np.array(obs["units"]["position"][self.opp_team_id])
 
-        available_unit_ids = np.where(unit_mask)[0]
-        num_units = len(available_unit_ids)
-
         current_team_points = obs["team_points"][self.team_id]
 
         # 1) Update possible reward tiles
@@ -381,10 +378,6 @@ class BestAgent:
 
         actions = np.zeros((self.env_cfg["max_units"], 3), dtype=int)
         available_unit_ids = np.where(obs["units_mask"][self.team_id])[0]
-
-        # Return if no units
-        if num_units == 0:
-            return actions.tolist()
 
         map_width = self.env_cfg["map_width"]
         map_height = self.env_cfg["map_height"]
@@ -437,10 +430,6 @@ class BestAgent:
 
         # Remove these units from the remaining pool so they are not reassigned.
         # remaining_units = [u for u in remaining_units if u not in already_on_reward_units]
-
-        if len(remaining_units) == 0:
-            return actions.tolist()
-
         relic_targets = list(self.known_relic_positions)
         if len(self.known_relic_positions) > 0:
             block_radius = 2
@@ -625,7 +614,7 @@ class BestAgent:
                 self.known_relic_positions.append((rx, ry))
 
 
-def evaluate_agents(agent_1_cls, agent_2_cls, seed=44, games_to_play=3, replay_save_dir="replays"):
+def evaluate_agents(agent_1_cls, agent_2_cls, seed=45, games_to_play=3, replay_save_dir="replays"):
     # Ensure the replay directory exists
     os.makedirs(replay_save_dir, exist_ok=True)
 
