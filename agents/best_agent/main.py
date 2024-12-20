@@ -273,7 +273,7 @@ class BestAgent:
         relic_nodes = obs["relic_nodes"][relic_nodes_mask]
 
         new_possible = set()
-        block_radius = 5
+        block_radius = 4
         map_width = self.env_cfg["map_width"]
         map_height = self.env_cfg["map_height"]
         for (rx, ry) in relic_nodes:

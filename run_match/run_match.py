@@ -6,10 +6,11 @@ from agents.baseline_agent.baselineagent import BaselineAgent
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
+from agents.best_agent.main import BestAgent
 from high_energy_agent import RelicHuntingShootingAgent
 
 
-class BestAgent:
+class BestAgent4:
     def __init__(self, player: str, env_cfg) -> None:
         self.player = player
         self.opp_player = "player_1" if self.player == "player_0" else "player_0"
@@ -276,7 +277,7 @@ class BestAgent:
         relic_nodes = obs["relic_nodes"][relic_nodes_mask]
 
         new_possible = set()
-        block_radius = 5
+        block_radius = 3
         map_width = self.env_cfg["map_width"]
         map_height = self.env_cfg["map_height"]
         for (rx, ry) in relic_nodes:
@@ -654,8 +655,8 @@ def evaluate_agents(agent_1_cls, agent_2_cls, seed=45, games_to_play=3, replay_s
 
 if __name__ == "__main__":
     # Run evaluation with the dummy Agent against itself
-    evaluate_agents(RelicHuntingShootingAgent, BestAgent, games_to_play=20,
-                    replay_save_dir="replays/" + RelicHuntingShootingAgent.__name__ + "_" + BestAgent.__name__)
+    evaluate_agents(BestAgent, BestAgent4, games_to_play=20,
+                    replay_save_dir="replays/" + BestAgent.__name__ + "_" + BestAgent4.__name__)
 
     # After running, you can check the "replays" directory for saved replay files.
     # You can set breakpoints anywhere in this file or inside the Agent class.
