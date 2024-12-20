@@ -5,7 +5,7 @@ import numpy as np
 from scipy.optimize import linear_sum_assignment
 
 
-class RelicHuntingShootingAgent:
+class BestAgent:
     def __init__(self, player: str, env_cfg) -> None:
         self.player = player
         self.opp_player = "player_1" if self.player == "player_0" else "player_0"
@@ -15,7 +15,6 @@ class RelicHuntingShootingAgent:
         self.env_cfg = env_cfg
 
         self.last_team_points = 0
-        self.last_relic_gain = 0
         self.relic_allocation = 20
         self.current_tester_tile = None
         self.current_tester_tile_relic = None
@@ -32,6 +31,8 @@ class RelicHuntingShootingAgent:
         self.known_reward_tiles = set()
         self.last_gain = 0
         self.last_unknown_occupied = set()
+        self.newly_unoccupied_unknown = set()
+        self.newly_unoccupied_known = set()
 
         # New attribute to store known relic locations across games
         self.known_relic_positions = []  # list of (x, y) relic coordinates known from previous games
@@ -171,10 +172,10 @@ class RelicHuntingShootingAgent:
             if pos in self.known_reward_tiles:
                 currently_reward_occupied.add(pos)
 
-        newly_unoccupied_unknown = self.last_unknown_occupied - occupied_this_turn
-        newly_unoccupied_known = self.last_reward_occupied - currently_reward_occupied
+        self.newly_unoccupied_unknown = self.last_unknown_occupied - occupied_this_turn
+        self.newly_unoccupied_known = self.last_reward_occupied - currently_reward_occupied
 
-        newly_unoccupied = newly_unoccupied_unknown.union(newly_unoccupied_known)
+        newly_unoccupied = self.newly_unoccupied_unknown.union(self.newly_unoccupied_known)
 
         # Determine if gain rate went down compared to last turn's gain
         last_gain = getattr(self, 'last_gain', 0)  # if not set, assume 0 from previous turn
@@ -200,10 +201,14 @@ class RelicHuntingShootingAgent:
             if len(newly_unoccupied) == 1 and len(newly_occupied) == 0:
                 self.not_reward_tiles.update(newly_unoccupied)
 
+            if len(newly_occupied) == 1 and len(self.newly_unoccupied_known) == 1:
+                self.known_reward_tiles.update(newly_occupied)
+                self.unknown_tiles -= newly_occupied
+
         if gain_rate > 0:
             # We entered a new reward square
             newly_occupied = occupied_this_turn - self.last_unknown_occupied
-            if len(newly_occupied) == 1 and len(newly_unoccupied_known) == 0:
+            if len(newly_occupied) == 1 and len(self.newly_unoccupied_known) == 0:
                 # Exactly one new tile caused the gain
                 self.known_reward_tiles.update(newly_occupied)
                 self.unknown_tiles -= newly_occupied
@@ -222,7 +227,7 @@ class RelicHuntingShootingAgent:
             # This suggests we lost a reward tile occupant
             # Tiles that were occupied last turn but not this turn:
             newly_occupied = occupied_this_turn - self.last_unknown_occupied
-            if len(newly_occupied) == 1 and len(newly_unoccupied_known) == 0:
+            if len(newly_occupied) == 1 and len(self.newly_unoccupied_known) == 0:
 
                 # This isn't working correctly
                 # For now it's degrading bot performance in subsequent rounds because we're doing a
@@ -248,6 +253,7 @@ class RelicHuntingShootingAgent:
         self.last_gain = gain  # Store current gain for next turn
 
         # Print current categorization results
+        print("\n Time step:", obs["steps"])
         print("Possible Tiles:", len(self.possible_reward_tiles))
         print("Unknown Tiles:", len(self.unknown_tiles))
         print("Not Reward Tiles:", len(self.not_reward_tiles))
@@ -362,23 +368,12 @@ class RelicHuntingShootingAgent:
         self.update_tile_results(current_team_points, obs)
 
         relic_nodes_mask = obs["relic_nodes_mask"]
-        relic_nodes_positions = obs["relic_nodes"][relic_nodes_mask]
-
-        # Add newly discovered relics to known_relic_positions
-        for (rx, ry) in relic_nodes_positions:
-            if (rx, ry) not in self.relic_tile_data:
-                self.relic_tile_data[(rx, ry)] = {}
-                for bx in range(rx-2, rx+3):
-                    for by in range(ry-2, ry+3):
-                        if 0 <= bx < self.env_cfg["map_width"] and 0 <= by < self.env_cfg["map_height"]:
-                            self.relic_tile_data[(rx, ry)][(bx, by)] = {"tested": False, "reward_tile": False}
-            # If it's a new relic not seen in previous games, store it
-            if (rx, ry) not in self.known_relic_positions:
-                self.known_relic_positions.append((rx, ry))
+        self.add_newly_discovered_relics(obs["relic_nodes"][relic_nodes_mask])
 
         actions = np.zeros((self.env_cfg["max_units"], 3), dtype=int)
         available_unit_ids = np.where(obs["units_mask"][self.team_id])[0]
 
+        # Return if no units
         if num_units == 0:
             self.last_team_points = current_team_points
             self.last_unit_positions = []
@@ -390,9 +385,6 @@ class RelicHuntingShootingAgent:
         map_width = self.env_cfg["map_width"]
         map_height = self.env_cfg["map_height"]
 
-        sap_range = self.env_cfg.get("unit_sap_range", 1)
-        sap_cost = self.env_cfg.get("unit_sap_cost", 10)
-
         opp_visible_mask = (opp_positions[:,0] != -1) & (opp_positions[:,1] != -1)
         visible_opp_ids = np.where(opp_visible_mask)[0]
 
@@ -403,48 +395,47 @@ class RelicHuntingShootingAgent:
                 enemy_positions[(ex, ey)] = []
             enemy_positions[(ex, ey)].append(oid)
 
-        relics = relic_nodes_positions.tolist()
+        actions = np.zeros((self.env_cfg["max_units"], 3), dtype=int)
 
-        current_relic_gain = current_team_points - self.last_team_points
-        self.last_relic_gain = current_relic_gain
+        # We'll keep track of enemy positions already targeted this turn to avoid overkill
+        targeted_enemies = set()
 
-        # Attempt sap action
         sap_done = set()
-        for unit_id in available_unit_ids:
-            ux, uy = unit_positions[unit_id]
-            uenergy = unit_energy[unit_id]
-
-            if uenergy > sap_cost:
-                found_target = False
-                for dx in range(-sap_range, sap_range + 1):
-                    for dy in range(-sap_range, sap_range + 1):
-                        tx = ux + dx
-                        ty = uy + dy
-                        if tx < 0 or tx >= map_width or ty < 0 or ty >= map_height:
-                            continue
-
-                        center_count = 0
-                        adjacent_count = 0
-                        for adjx in [-1, 0, 1]:
-                            for adjy in [-1, 0, 1]:
-                                cx = tx + adjx
-                                cy = ty + adjy
-                                if (cx, cy) in enemy_positions:
-                                    ccount = len(enemy_positions[(cx, cy)])
-                                    if adjx == 0 and adjy == 0:
-                                        center_count = ccount
-                                    else:
-                                        adjacent_count += ccount
-
-                        if center_count > 0 and adjacent_count >= 0:
-                            actions[unit_id] = [5, dx, dy]
-                            sap_done.add(unit_id)
-                            found_target = True
-                            break
-                    if found_target:
-                        break
+        self.do_sapping_logic(actions,
+                              available_unit_ids,
+                              enemy_positions,
+                              self.env_cfg.get("unit_sap_cost", 10),
+                              sap_done,
+                              self.env_cfg.get("unit_sap_range", 1),
+                              targeted_enemies,
+                              unit_energy,
+                              unit_positions)
 
         remaining_units = [u for u in available_unit_ids if u not in sap_done]
+
+        # NEW LOGIC: Identify units already on a reward tile.
+        already_on_reward_units = []
+        occupied_positions = set()
+        for u in remaining_units:
+            ux, uy = unit_positions[u]
+            if (ux, uy) in self.known_reward_tiles:
+                # If the unit is on a reward tile, do not move it.
+                actions[u] = [0, 0, 0]
+                already_on_reward_units.append(u)
+                occupied_positions.add((ux, uy))
+
+        # NEW LOGIC: If a unit is already on a reward tile, let it stay there.
+        already_on_reward_units = []
+        for u in remaining_units:
+            ux, uy = unit_positions[u]
+            if (ux, uy) in self.known_reward_tiles:
+                # If the unit is on a reward tile, do not move it.
+                actions[u] = [0, 0, 0]
+                already_on_reward_units.append(u)
+
+        # Remove these units from the remaining pool so they are not reassigned.
+        # remaining_units = [u for u in remaining_units if u not in already_on_reward_units]
+
         if len(remaining_units) == 0:
             self.last_team_points = current_team_points
             self.last_unit_positions = []
@@ -454,9 +445,9 @@ class RelicHuntingShootingAgent:
             return actions
 
         relic_targets = list(self.known_relic_positions)
-        if len(relics) > 0:
+        if len(self.known_relic_positions) > 0:
             block_radius = 2
-            for (rx, ry) in relics:
+            for (rx, ry) in self.known_relic_positions:
                 for bx in range(rx - block_radius, rx + block_radius + 1):
                     for by in range(ry - block_radius, ry + block_radius + 1):
                         if 0 <= bx < map_width and 0 <= by < map_height:
@@ -464,6 +455,10 @@ class RelicHuntingShootingAgent:
             relic_targets = list(set(relic_targets))
 
         relic_targets = list(set(list(set(relic_targets) - set(self.not_reward_tiles)) + list(self.known_reward_tiles)))
+
+        # NEW LOGIC: Remove occupied positions (units that are staying put) from relic targets
+        # relic_targets = [t for t in relic_targets if t not in occupied_positions]
+
 
         # Prioritization constants
         REWARD_BONUS = -50
@@ -480,8 +475,8 @@ class RelicHuntingShootingAgent:
                     cost = dist
                     if (tx, ty) in self.known_reward_tiles:
                         cost += REWARD_BONUS
-                        if cost < 0:
-                            cost = 0
+                        # if cost < 0:
+                        #     cost = 0
                     if (tx, ty) in self.not_reward_tiles:
                         cost += NON_REWARD_PENALTY
                     relic_cost_matrix[i, j] = cost
@@ -527,6 +522,9 @@ class RelicHuntingShootingAgent:
                 cell_center_x = min(cell_center_x, map_width - 1)
                 cell_center_y = min(cell_center_y, map_height - 1)
                 targets.append((cell_center_x, cell_center_y))
+
+            # NEW LOGIC: Remove occupied positions from general targets as well
+            # targets = [t for t in targets if t not in occupied_positions]
 
             num_remaining = still_num_units
             used_cell_count = min(num_remaining, assigned_cell_count)
@@ -594,6 +592,47 @@ class RelicHuntingShootingAgent:
 
         return actions
 
+    def do_sapping_logic(self, actions, available_unit_ids, enemy_positions, sap_cost, sap_done, sap_range,
+                         targeted_enemies, unit_energy, unit_positions):
+        for unit_id in available_unit_ids:
+            ux, uy = unit_positions[unit_id]
+            uenergy = unit_energy[unit_id]
+
+            # Only consider sapping if we have enough energy
+            if uenergy > sap_cost:
+                # Search for a visible enemy unit in sap range
+                # We'll prioritize closer enemies or just any enemy we find
+                # For simplicity, just take the first enemy in range
+                found_target = False
+                for dx in range(-sap_range, sap_range + 1):
+                    for dy in range(-sap_range, sap_range + 1):
+                        tx = ux + dx
+                        ty = uy + dy
+                        # Check if an enemy occupies this tile and not already targeted
+                        if (tx, ty) in enemy_positions and (tx, ty) not in targeted_enemies:
+                            # We found an enemy unit to sap
+                            # The sap action: action code 5 indicates sap, dx and dy are relative moves
+                            actions[unit_id] = [5, dx, dy]
+                            sap_done.add(unit_id)
+                            targeted_enemies.add((tx, ty))
+                            found_target = True
+                            break
+                    if found_target:
+                        break
+
+    def add_newly_discovered_relics(self, relic_nodes_positions):
+        # Add newly discovered relics to known_relic_positions
+        for (rx, ry) in relic_nodes_positions:
+            if (rx, ry) not in self.relic_tile_data:
+                self.relic_tile_data[(rx, ry)] = {}
+                for bx in range(rx - 2, rx + 3):
+                    for by in range(ry - 2, ry + 3):
+                        if 0 <= bx < self.env_cfg["map_width"] and 0 <= by < self.env_cfg["map_height"]:
+                            self.relic_tile_data[(rx, ry)][(bx, by)] = {"tested": False, "reward_tile": False}
+            # If it's a new relic not seen in previous games, store it
+            if (rx, ry) not in self.known_relic_positions:
+                self.known_relic_positions.append((rx, ry))
+
 def from_json(state):
     if isinstance(state, list):
         return np.array(state)
@@ -621,7 +660,7 @@ def agent_fn(observation, configurations):
     player = observation.player
     remainingOverageTime = observation.remainingOverageTime
     if step == 0:
-        agent_dict[player] = RelicHuntingShootingAgent(player, configurations["env_cfg"])
+        agent_dict[player] = BestAgent(player, configurations["env_cfg"])
     agent = agent_dict[player]
     actions = agent.act(step, from_json(obs), remainingOverageTime)
     return dict(action=actions.tolist())

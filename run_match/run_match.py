@@ -6,8 +6,10 @@ from agents.baseline_agent.baselineagent import BaselineAgent
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
+from high_energy_agent import RelicHuntingShootingAgent
 
-class RelicHuntingShootingAgent:
+
+class BestAgent:
     def __init__(self, player: str, env_cfg) -> None:
         self.player = player
         self.opp_player = "player_1" if self.player == "player_0" else "player_0"
@@ -17,7 +19,6 @@ class RelicHuntingShootingAgent:
         self.env_cfg = env_cfg
 
         self.last_team_points = 0
-        self.last_relic_gain = 0
         self.relic_allocation = 20
         self.current_tester_tile = None
         self.current_tester_tile_relic = None
@@ -371,23 +372,12 @@ class RelicHuntingShootingAgent:
         self.update_tile_results(current_team_points, obs)
 
         relic_nodes_mask = obs["relic_nodes_mask"]
-        relic_nodes_positions = obs["relic_nodes"][relic_nodes_mask]
-
-        # Add newly discovered relics to known_relic_positions
-        for (rx, ry) in relic_nodes_positions:
-            if (rx, ry) not in self.relic_tile_data:
-                self.relic_tile_data[(rx, ry)] = {}
-                for bx in range(rx-2, rx+3):
-                    for by in range(ry-2, ry+3):
-                        if 0 <= bx < self.env_cfg["map_width"] and 0 <= by < self.env_cfg["map_height"]:
-                            self.relic_tile_data[(rx, ry)][(bx, by)] = {"tested": False, "reward_tile": False}
-            # If it's a new relic not seen in previous games, store it
-            if (rx, ry) not in self.known_relic_positions:
-                self.known_relic_positions.append((rx, ry))
+        self.add_newly_discovered_relics(obs["relic_nodes"][relic_nodes_mask])
 
         actions = np.zeros((self.env_cfg["max_units"], 3), dtype=int)
         available_unit_ids = np.where(obs["units_mask"][self.team_id])[0]
 
+        # Return if no units
         if num_units == 0:
             self.last_team_points = current_team_points
             self.last_unit_positions = []
@@ -399,9 +389,6 @@ class RelicHuntingShootingAgent:
         map_width = self.env_cfg["map_width"]
         map_height = self.env_cfg["map_height"]
 
-        sap_range = self.env_cfg.get("unit_sap_range", 1)
-        sap_cost = self.env_cfg.get("unit_sap_cost", 10)
-
         opp_visible_mask = (opp_positions[:,0] != -1) & (opp_positions[:,1] != -1)
         visible_opp_ids = np.where(opp_visible_mask)[0]
 
@@ -411,29 +398,6 @@ class RelicHuntingShootingAgent:
             if (ex, ey) not in enemy_positions:
                 enemy_positions[(ex, ey)] = []
             enemy_positions[(ex, ey)].append(oid)
-
-        relics = relic_nodes_positions.tolist()
-
-        current_relic_gain = current_team_points - self.last_team_points
-        self.last_relic_gain = current_relic_gain
-
-        sap_range = self.env_cfg.get("unit_sap_range", 1)
-        sap_cost = self.env_cfg.get("unit_sap_cost", 10)
-
-        opp_visible_mask = (opp_positions[:,0] != -1) & (opp_positions[:,1] != -1)
-        visible_opp_ids = np.where(opp_visible_mask)[0]
-
-        enemy_positions = {}
-        for oid in visible_opp_ids:
-            ex, ey = opp_positions[oid]
-            if (ex, ey) not in enemy_positions:
-                enemy_positions[(ex, ey)] = []
-            enemy_positions[(ex, ey)].append(oid)
-
-        relics = relic_nodes_positions.tolist()
-
-        current_relic_gain = current_team_points - self.last_team_points
-        self.last_relic_gain = current_relic_gain
 
         actions = np.zeros((self.env_cfg["max_units"], 3), dtype=int)
 
@@ -441,31 +405,15 @@ class RelicHuntingShootingAgent:
         targeted_enemies = set()
 
         sap_done = set()
-        for unit_id in available_unit_ids:
-            ux, uy = unit_positions[unit_id]
-            uenergy = unit_energy[unit_id]
-
-            # Only consider sapping if we have enough energy
-            if uenergy > sap_cost:
-                # Search for a visible enemy unit in sap range
-                # We'll prioritize closer enemies or just any enemy we find
-                # For simplicity, just take the first enemy in range
-                found_target = False
-                for dx in range(-sap_range, sap_range + 1):
-                    for dy in range(-sap_range, sap_range + 1):
-                        tx = ux + dx
-                        ty = uy + dy
-                        # Check if an enemy occupies this tile and not already targeted
-                        if (tx, ty) in enemy_positions and (tx, ty) not in targeted_enemies:
-                            # We found an enemy unit to sap
-                            # The sap action: action code 5 indicates sap, dx and dy are relative moves
-                            actions[unit_id] = [5, dx, dy]
-                            sap_done.add(unit_id)
-                            targeted_enemies.add((tx, ty))
-                            found_target = True
-                            break
-                    if found_target:
-                        break
+        self.do_sapping_logic(actions,
+                              available_unit_ids,
+                              enemy_positions,
+                              self.env_cfg.get("unit_sap_cost", 10),
+                              sap_done,
+                              self.env_cfg.get("unit_sap_range", 1),
+                              targeted_enemies,
+                              unit_energy,
+                              unit_positions)
 
         remaining_units = [u for u in available_unit_ids if u not in sap_done]
 
@@ -501,9 +449,9 @@ class RelicHuntingShootingAgent:
             return actions
 
         relic_targets = list(self.known_relic_positions)
-        if len(relics) > 0:
+        if len(self.known_relic_positions) > 0:
             block_radius = 2
-            for (rx, ry) in relics:
+            for (rx, ry) in self.known_relic_positions:
                 for bx in range(rx - block_radius, rx + block_radius + 1):
                     for by in range(ry - block_radius, ry + block_radius + 1):
                         if 0 <= bx < map_width and 0 <= by < map_height:
@@ -648,7 +596,49 @@ class RelicHuntingShootingAgent:
 
         return actions
 
-def evaluate_agents(agent_1_cls, agent_2_cls, seed=42, games_to_play=3, replay_save_dir="replays"):
+    def do_sapping_logic(self, actions, available_unit_ids, enemy_positions, sap_cost, sap_done, sap_range,
+                         targeted_enemies, unit_energy, unit_positions):
+        for unit_id in available_unit_ids:
+            ux, uy = unit_positions[unit_id]
+            uenergy = unit_energy[unit_id]
+
+            # Only consider sapping if we have enough energy
+            if uenergy > sap_cost:
+                # Search for a visible enemy unit in sap range
+                # We'll prioritize closer enemies or just any enemy we find
+                # For simplicity, just take the first enemy in range
+                found_target = False
+                for dx in range(-sap_range, sap_range + 1):
+                    for dy in range(-sap_range, sap_range + 1):
+                        tx = ux + dx
+                        ty = uy + dy
+                        # Check if an enemy occupies this tile and not already targeted
+                        if (tx, ty) in enemy_positions and (tx, ty) not in targeted_enemies:
+                            # We found an enemy unit to sap
+                            # The sap action: action code 5 indicates sap, dx and dy are relative moves
+                            actions[unit_id] = [5, dx, dy]
+                            sap_done.add(unit_id)
+                            targeted_enemies.add((tx, ty))
+                            found_target = True
+                            break
+                    if found_target:
+                        break
+
+    def add_newly_discovered_relics(self, relic_nodes_positions):
+        # Add newly discovered relics to known_relic_positions
+        for (rx, ry) in relic_nodes_positions:
+            if (rx, ry) not in self.relic_tile_data:
+                self.relic_tile_data[(rx, ry)] = {}
+                for bx in range(rx - 2, rx + 3):
+                    for by in range(ry - 2, ry + 3):
+                        if 0 <= bx < self.env_cfg["map_width"] and 0 <= by < self.env_cfg["map_height"]:
+                            self.relic_tile_data[(rx, ry)][(bx, by)] = {"tested": False, "reward_tile": False}
+            # If it's a new relic not seen in previous games, store it
+            if (rx, ry) not in self.known_relic_positions:
+                self.known_relic_positions.append((rx, ry))
+
+
+def evaluate_agents(agent_1_cls, agent_2_cls, seed=44, games_to_play=3, replay_save_dir="replays"):
     # Ensure the replay directory exists
     os.makedirs(replay_save_dir, exist_ok=True)
 
@@ -688,8 +678,8 @@ def evaluate_agents(agent_1_cls, agent_2_cls, seed=42, games_to_play=3, replay_s
 
 if __name__ == "__main__":
     # Run evaluation with the dummy Agent against itself
-    evaluate_agents(BaselineAgent, RelicHuntingShootingAgent, games_to_play=5,
-                    replay_save_dir="replays/" + BaselineAgent.__name__ + "_" + RelicHuntingShootingAgent.__name__)
+    evaluate_agents(RelicHuntingShootingAgent, BestAgent, games_to_play=20,
+                    replay_save_dir="replays/" + RelicHuntingShootingAgent.__name__ + "_" + BestAgent.__name__)
 
     # After running, you can check the "replays" directory for saved replay files.
     # You can set breakpoints anywhere in this file or inside the Agent class.
