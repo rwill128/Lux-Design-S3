@@ -6,11 +6,11 @@ from agents.baseline_agent.baselineagent import BaselineAgent
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
-from agents.best_agent.main import BestAgent
+from agents.best_agent.main import BestAgent2
 from high_energy_agent import RelicHuntingShootingAgent
 
 
-class BestAgent2:
+class BestAgentBetterShooter:
     def __init__(self, player: str, env_cfg) -> None:
         self.player = player
         self.opp_player = "player_1" if self.player == "player_0" else "player_0"
@@ -71,7 +71,9 @@ class BestAgent2:
         next_step = path[1]
         dx = next_step[0] - from_pos[0]
         dy = next_step[1] - from_pos[1]
-        return self.dxdy_to_action(dx, dy)
+        action = self.dxdy_to_action(dx, dy)
+        assert isinstance(action, int), f"Action is not an integer! Found: {action} (type: {type(action)})"
+        return action
 
     def update_tile_results(self, current_points):
         baseline = 0
@@ -334,9 +336,6 @@ class BestAgent2:
                 enemy_positions[(ex, ey)] = []
             enemy_positions[(ex, ey)].append(oid)
 
-        # We'll keep track of enemy positions already targeted this turn to avoid overkill
-        targeted_enemies = set()
-
         sap_done = set()
         self.do_sapping_logic(actions,
                               available_unit_ids,
@@ -344,9 +343,9 @@ class BestAgent2:
                               self.env_cfg.get("unit_sap_cost", 10),
                               sap_done,
                               self.env_cfg.get("unit_sap_range", 1),
-                              targeted_enemies,
-                              unit_energy,
-                              unit_positions)
+                              np.array(obs["units"]["energy"][self.team_id]),
+                              unit_positions,
+                              opp_energy=np.array(obs["units"]["energy"][self.opp_team_id]))
 
         remaining_units = [u for u in available_unit_ids if u not in sap_done]
 
@@ -386,8 +385,6 @@ class BestAgent2:
 
         # NEW LOGIC: Remove occupied positions (units that are staying put) from relic targets
         # relic_targets = [t for t in relic_targets if t not in occupied_positions]
-
-
         # Prioritization constants
         REWARD_BONUS = -50
         POTENTIAL_RELIC_POINTS = -10
@@ -512,35 +509,61 @@ class BestAgent2:
 
             self.end_of_match_printed = True
 
+        # Before returning actions:
+        a = actions[:, 0]  # action codes
+        dx = actions[:, 1]
+        dy = actions[:, 2]
+
+        # Actions that are not "sap" (5) should remain in the original range
+        non_sap_mask = (a != 5)
+        assert np.all(a[non_sap_mask] >= 0), f"Non-sap actions must be >= 0. Got: {a[non_sap_mask]}"
+        assert np.all(a[non_sap_mask] <= 4), f"Non-sap actions must be <= 4. Got: {a[non_sap_mask]}"
+        assert np.all(dx[non_sap_mask] == 0), f"dx must be 0 for non-sap actions. Got: {dx[non_sap_mask]}"
+        assert np.all(dy[non_sap_mask] == 0), f"dy must be 0 for non-sap actions. Got: {dy[non_sap_mask]}"
+
+        # Actions that are "sap" (5) must have dx and dy in [-10, 10]
+        sap_mask = (a == 5)
+        assert np.all(dx[sap_mask] >= -10), f"Sap dx out of range. Got: {dx[sap_mask]}"
+        assert np.all(dx[sap_mask] <= 10), f"Sap dx out of range. Got: {dx[sap_mask]}"
+        assert np.all(dy[sap_mask] >= -10), f"Sap dy out of range. Got: {dy[sap_mask]}"
+        assert np.all(dy[sap_mask] <= 10), f"Sap dy out of range. Got: {dy[sap_mask]}"
+
         return actions
 
     def do_sapping_logic(self, actions, available_unit_ids, enemy_positions, sap_cost, sap_done, sap_range,
-                         targeted_enemies, unit_energy, unit_positions):
+                         unit_energy, unit_positions, opp_energy):
+        targeted_enemies = set()
         for unit_id in available_unit_ids:
             ux, uy = unit_positions[unit_id]
             uenergy = unit_energy[unit_id]
 
             # Only consider sapping if we have enough energy
             if uenergy > sap_cost:
-                # Search for a visible enemy unit in sap range
-                # We'll prioritize closer enemies or just any enemy we find
-                # For simplicity, just take the first enemy in range
+                # Search for a visible weaker enemy unit in sap range
                 found_target = False
                 for dx in range(-sap_range, sap_range + 1):
+                    if found_target:
+                        break
                     for dy in range(-sap_range, sap_range + 1):
                         tx = ux + dx
                         ty = uy + dy
                         # Check if an enemy occupies this tile and not already targeted
                         if (tx, ty) in enemy_positions and (tx, ty) not in targeted_enemies:
-                            # We found an enemy unit to sap
-                            # The sap action: action code 5 indicates sap, dx and dy are relative moves
-                            actions[unit_id] = [5, dx, dy]
-                            sap_done.add(unit_id)
-                            targeted_enemies.add((tx, ty))
-                            found_target = True
+                            # Check enemy units in that tile
+                            enemy_ids = enemy_positions[(tx, ty)]
+                            # Find any enemy weaker than us
+                            for eid in enemy_ids:
+                                enemy_energy = opp_energy[eid]
+                                if enemy_energy < uenergy:
+                                    # We found a weaker enemy unit to sap
+                                    # action code 5 = sap, dx and dy are relative moves
+                                    actions[unit_id] = [5, dx, dy]
+                                    sap_done.add(unit_id)
+                                    targeted_enemies.add((tx, ty))
+                                    found_target = True
+                                    break
+                        if found_target:
                             break
-                    if found_target:
-                        break
 
     def add_newly_discovered_relics(self, relic_nodes_positions):
         # Add newly discovered relics to known_relic_positions
@@ -596,8 +619,8 @@ def evaluate_agents(agent_1_cls, agent_2_cls, seed=45, games_to_play=3, replay_s
 
 if __name__ == "__main__":
     # Run evaluation with the dummy Agent against itself
-    evaluate_agents(BestAgent, BestAgent2, games_to_play=20,
-                    replay_save_dir="replays/" + BestAgent.__name__ + "_" + BestAgent2.__name__)
+    evaluate_agents(BestAgentBetterShooter, BestAgent2, games_to_play=20,
+                    replay_save_dir="replays/" + BestAgentBetterShooter.__name__ + "_" + BestAgent2.__name__)
 
     # After running, you can check the "replays" directory for saved replay files.
     # You can set breakpoints anywhere in this file or inside the Agent class.

@@ -5,7 +5,7 @@ import numpy as np
 from scipy.optimize import linear_sum_assignment
 
 
-class BestAgent:
+class BestAgent2:
     def __init__(self, player: str, env_cfg) -> None:
         self.player = player
         self.opp_player = "player_1" if self.player == "player_0" else "player_0"
@@ -16,8 +16,6 @@ class BestAgent:
 
         self.last_team_points = 0
         self.relic_allocation = 20
-        self.current_tester_tile = None
-        self.current_tester_tile_relic = None
         self.expected_baseline_gain = 0
 
         self.relic_tile_data = {}
@@ -49,7 +47,6 @@ class BestAgent:
             return 3 if dy > 0 else 1  # move down or up
 
     def dxdy_to_action(self, dx, dy):
-        # ... unchanged ...
         if dx > 0:
             return 2  # right
         elif dx < 0:
@@ -60,48 +57,7 @@ class BestAgent:
             return 1  # up
         return 0  # stay
 
-    def bfs_pathfind(self, map_width, map_height, start, goal, obs):
-        # ... unchanged ...
-        sensor_mask = obs["sensor_mask"]
-        tile_type_map = obs["map_features"]["tile_type"]
-
-        def is_passable(x, y):
-            if x < 0 or x >= map_width or y < 0 or y >= map_height:
-                return False
-            if sensor_mask[x, y]:
-                # We can see the tile, check if asteroid
-                if tile_type_map[x, y] == 2:
-                    return False
-                return True
-            else:
-                return True
-
-        from collections import deque
-        queue = deque([start])
-        came_from = {start: None}
-
-        while queue:
-            current = queue.popleft()
-            if current == goal:
-                # Reconstruct path
-                path = []
-                while current is not None:
-                    path.append(current)
-                    current = came_from[current]
-                path.reverse()
-                return path
-
-            (cx, cy) = current
-            for dx, dy in [(0,0),(1,0),(-1,0),(0,1),(0,-1)]:
-                nx, ny = cx+dx, cy+dy
-                if 0 <= nx < map_width and 0 <= ny < map_height:
-                    if is_passable(nx, ny) and (nx, ny) not in came_from:
-                        came_from[(nx, ny)] = (cx, cy)
-                        queue.append((nx, ny))
-        return None
-
     def get_direction_via_pathfinding(self, from_pos, to_pos, obs):
-        # ... unchanged ...
         if from_pos == to_pos:
             return 0  # Already at target
         path = self.dijkstra_pathfind(self.env_cfg["map_width"], self.env_cfg["map_height"], from_pos, to_pos, obs)
@@ -112,8 +68,7 @@ class BestAgent:
         dy = next_step[1] - from_pos[1]
         return self.dxdy_to_action(dx, dy)
 
-    def update_tile_results(self, current_points, obs):
-        # ... unchanged ...
+    def update_tile_results(self, current_points):
         baseline = 0
         for (x, y) in self.last_unit_positions:
             for relic_pos, tiles_data in self.relic_tile_data.items():
@@ -138,8 +93,6 @@ class BestAgent:
             for relic_pos, tile_pos in selected_candidates:
                 self.relic_tile_data[relic_pos][tile_pos]["reward_tile"] = True
                 self.relic_tile_data[relic_pos][tile_pos]["tested"] = True
-            self.current_tester_tile = None
-            self.current_tester_tile_relic = None
 
     def select_tiles_for_relic(self, relic_pos):
         # ... unchanged ...
@@ -272,12 +225,12 @@ class BestAgent:
         relic_nodes = obs["relic_nodes"][relic_nodes_mask]
 
         new_possible = set()
-        block_radius = 5
+        block_radius = 2
         map_width = self.env_cfg["map_width"]
         map_height = self.env_cfg["map_height"]
         for (rx, ry) in relic_nodes:
-            for bx in range(rx - block_radius, rx + block_radius):
-                for by in range(ry - block_radius, ry + block_radius):
+            for bx in range(rx - block_radius, rx + block_radius + 1):
+                for by in range(ry - block_radius, ry + block_radius + 1):
                     if 0 <= bx < map_width and 0 <= by < map_height:
                         new_possible.add((bx, by))
 
@@ -339,27 +292,12 @@ class BestAgent:
 
         return None  # No path found
 
-    def get_direction_via_pathfinding(self, from_pos, to_pos, obs):
-        if from_pos == to_pos:
-            return 0  # Already at target
-        path = self.dijkstra_pathfind(self.env_cfg["map_width"], self.env_cfg["map_height"], from_pos, to_pos, obs)
-        if path is None or len(path) < 2:
-            return self.simple_heuristic_move(from_pos, to_pos)
-        next_step = path[1]
-        dx = next_step[0] - from_pos[0]
-        dy = next_step[1] - from_pos[1]
-        return self.dxdy_to_action(dx, dy)
-
-
     def act(self, step: int, obs, remainingOverageTime: int = 60):
         unit_mask = np.array(obs["units_mask"][self.team_id])
         unit_positions = np.array(obs["units"]["position"][self.team_id])
         unit_energy = np.array(obs["units"]["energy"][self.team_id])
 
         opp_positions = np.array(obs["units"]["position"][self.opp_team_id])
-
-        available_unit_ids = np.where(unit_mask)[0]
-        num_units = len(available_unit_ids)
 
         current_team_points = obs["team_points"][self.team_id]
 
@@ -370,17 +308,13 @@ class BestAgent:
         self.deduce_reward_tiles(obs)
 
         # 3) Update global tile results
-        self.update_tile_results(current_team_points, obs)
+        self.update_tile_results(current_team_points)
 
         relic_nodes_mask = obs["relic_nodes_mask"]
         self.add_newly_discovered_relics(obs["relic_nodes"][relic_nodes_mask])
 
         actions = np.zeros((self.env_cfg["max_units"], 3), dtype=int)
         available_unit_ids = np.where(obs["units_mask"][self.team_id])[0]
-
-        # Return if no units
-        if num_units == 0:
-            return actions.tolist()
 
         map_width = self.env_cfg["map_width"]
         map_height = self.env_cfg["map_height"]
@@ -433,10 +367,6 @@ class BestAgent:
 
         # Remove these units from the remaining pool so they are not reassigned.
         # remaining_units = [u for u in remaining_units if u not in already_on_reward_units]
-
-        if len(remaining_units) == 0:
-            return actions.tolist()
-
         relic_targets = list(self.known_relic_positions)
         if len(self.known_relic_positions) > 0:
             block_radius = 2
@@ -647,7 +577,7 @@ def agent_fn(observation, configurations):
     player = observation.player
     remainingOverageTime = observation.remainingOverageTime
     if step == 0:
-        agent_dict[player] = BestAgent(player, configurations["env_cfg"])
+        agent_dict[player] = BestAgent2(player, configurations["env_cfg"])
     agent = agent_dict[player]
     actions = agent.act(step, from_json(obs), remainingOverageTime)
     return dict(action=actions.tolist())
