@@ -26,6 +26,7 @@ class RelicHuntingShootingAgent:
         self.last_unit_positions = []  # store positions of units from previous turn
 
         self.possible_reward_tiles = set()
+        self.last_reward_occupied = set()
         self.unknown_tiles = set()
         self.not_reward_tiles = set()
         self.known_reward_tiles = set()
@@ -162,12 +163,25 @@ class RelicHuntingShootingAgent:
             if (x,y) in self.unknown_tiles:
                 occupied_this_turn.add((x,y))
 
+        # Compute currently occupied known reward tiles
+        currently_reward_occupied = set()
+        for uid in np.where(unit_mask)[0]:
+            x, y = unit_positions[uid]
+            pos = (x, y)
+            if pos in self.known_reward_tiles:
+                currently_reward_occupied.add(pos)
+
+        newly_unoccupied_unknown = self.last_unknown_occupied - occupied_this_turn
+        newly_unoccupied_known = self.last_reward_occupied - currently_reward_occupied
+
+        newly_unoccupied = newly_unoccupied_unknown.union(newly_unoccupied_known)
+
         # Determine if gain rate went down compared to last turn's gain
         last_gain = getattr(self, 'last_gain', 0)  # if not set, assume 0 from previous turn
-        gain_drop = gain < last_gain
+        gain_rate = gain - last_gain
 
-        # Case 1: No or Negative Gain
-        if gain <= 0:
+        # We have the same number of reward squares
+        if gain == 0:
             # No point gain means no unknown tile contributed points this turn
             # Thus all unknown tiles occupied last turn are not reward
             self.not_reward_tiles.update(self.last_unknown_occupied)
@@ -176,8 +190,17 @@ class RelicHuntingShootingAgent:
             self.not_reward_tiles.update(occupied_this_turn.intersection(self.last_unknown_occupied))
             self.unknown_tiles -= self.not_reward_tiles
 
-        else:
-            # gain > 0
+        if gain_rate == 0:
+            newly_occupied = occupied_this_turn - self.last_unknown_occupied
+
+            if len(newly_occupied) == 1 and len(newly_unoccupied) == 0:
+                self.not_reward_tiles.update(newly_occupied)
+
+            if len(newly_unoccupied) == 1 and len(newly_occupied) == 0:
+                self.not_reward_tiles.update(newly_unoccupied)
+
+        if gain_rate > 0:
+            # We entered a new reward square
             newly_occupied = occupied_this_turn - self.last_unknown_occupied
             if len(newly_occupied) == 1:
                 # Exactly one new tile caused the gain
@@ -192,12 +215,20 @@ class RelicHuntingShootingAgent:
                 pass
                 # assert False, "Points went up but no new unknown tile was occupied."
 
-        # Additional logic: If gain rate dropped compared to last turn
-        if gain_drop:
+        # We have fewer reward squares
+        if gain_rate < 0:
             # We had fewer points gained this turn than last turn
             # This suggests we lost a reward tile occupant
             # Tiles that were occupied last turn but not this turn:
-            newly_unoccupied = self.last_unknown_occupied - occupied_this_turn
+            newly_occupied = occupied_this_turn - self.last_unknown_occupied
+            if len(newly_occupied) == 1:
+
+                # This isn't working correctly so we'll comment it our for now and debug it later
+                # For now it's degrading bot performance in subsequent rounds because we're doing a
+                # pretty good job of finding reward tiles the first round and then marking them as non-reward incorrectly
+                # self.not_reward_tiles.update(newly_occupied)
+                pass
+
             if len(newly_unoccupied) == 1:
                 # Exactly one tile was vacated and gain rate dropped
                 # That tile must have been a reward tile that we lost
@@ -206,8 +237,12 @@ class RelicHuntingShootingAgent:
             elif len(newly_unoccupied) > 1:
                 # More than one tile vacated - can't deduce which one caused the drop
                 pass
+            elif len(newly_unoccupied) == 0:
+                pass
+                # assert False, "We lost points but we don't have any newly unoccupied tiles?"
 
         # Update tracking
+        self.last_reward_occupied = currently_reward_occupied
         self.last_unknown_occupied = occupied_this_turn
         self.last_team_points = current_team_points
         self.last_gain = gain  # Store current gain for next turn
@@ -226,12 +261,12 @@ class RelicHuntingShootingAgent:
         relic_nodes = obs["relic_nodes"][relic_nodes_mask]
 
         new_possible = set()
-        block_radius = 2
+        block_radius = 4
         map_width = self.env_cfg["map_width"]
         map_height = self.env_cfg["map_height"]
         for (rx, ry) in relic_nodes:
-            for bx in range(rx - block_radius, rx + block_radius + 1):
-                for by in range(ry - block_radius, ry + block_radius + 1):
+            for bx in range(rx - block_radius, rx + block_radius):
+                for by in range(ry - block_radius, ry + block_radius):
                     if 0 <= bx < map_width and 0 <= by < map_height:
                         new_possible.add((bx, by))
 

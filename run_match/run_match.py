@@ -225,11 +225,10 @@ class RelicHuntingShootingAgent:
             newly_occupied = occupied_this_turn - self.last_unknown_occupied
             if len(newly_occupied) == 1:
 
-                # This isn't working correctly so we'll comment it our for now and debug it later
+                # This isn't working correctly
                 # For now it's degrading bot performance in subsequent rounds because we're doing a
                 # pretty good job of finding reward tiles the first round and then marking them as non-reward incorrectly
-                # self.not_reward_tiles.update(newly_occupied)
-                pass
+                self.not_reward_tiles.update(newly_occupied)
 
             if len(newly_unoccupied) == 1:
                 # Exactly one tile was vacated and gain rate dropped
@@ -403,7 +402,7 @@ class RelicHuntingShootingAgent:
 
         # Prioritization constants
         REWARD_BONUS = -50
-        NON_REWARD_PENALTY = 1000
+        NON_REWARD_PENALTY = 0
 
         if self.relic_allocation > 0 and len(relic_targets) > 0:
             relic_units_count = min(self.relic_allocation, len(remaining_units), len(relic_targets))
