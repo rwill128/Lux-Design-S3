@@ -1,6 +1,7 @@
 import json
 from argparse import Namespace
 
+import jnp
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
@@ -590,7 +591,9 @@ class BestAgent:
 
             self.end_of_match_printed = True
 
-        return actions
+        # Convert actions to JAX-compatible format
+        actions = {k: jnp.array(v) for k, v in actions.items()}
+        return self.jax_env.step(actions)
 
     def do_sapping_logic(self, actions, available_unit_ids, enemy_positions, sap_cost, sap_done, sap_range,
                          targeted_enemies, unit_energy, unit_positions):
