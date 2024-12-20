@@ -530,6 +530,85 @@ class BestAgentBetterShooter:
 
         return actions
 
+    def send_toward_relic_areas(self, actions, available_unit_ids, map_height, map_width, obs, sap_done,
+                                unit_positions):
+        remaining_units = [u for u in available_unit_ids if u not in sap_done]
+        # NEW LOGIC: Identify units already on a reward tile.
+        already_on_reward_units = []
+        occupied_positions = set()
+        for u in remaining_units:
+            ux, uy = unit_positions[u]
+            if (ux, uy) in self.known_reward_tiles:
+                # If the unit is on a reward tile, do not move it.
+                actions[u] = [0, 0, 0]
+                already_on_reward_units.append(u)
+                occupied_positions.add((ux, uy))
+        #
+        # # NEW LOGIC: If a unit is already on a reward tile, let it stay there.
+        already_on_reward_units = []
+        for u in remaining_units:
+            ux, uy = unit_positions[u]
+            if (ux, uy) in self.known_reward_tiles:
+                # If the unit is on a reward tile, do not move it.
+                actions[u] = [0, 0, 0]
+                already_on_reward_units.append(u)
+        # Remove these units from the remaining pool so they are not reassigned.
+        # remaining_units = [u for u in remaining_units if u not in already_on_reward_units]
+        relic_targets = list(self.known_relic_positions)
+        if len(self.known_relic_positions) > 0:
+            block_radius = 2
+            for (rx, ry) in self.known_relic_positions:
+                for bx in range(rx - block_radius, rx + block_radius + 1):
+                    for by in range(ry - block_radius, ry + block_radius + 1):
+                        if 0 <= bx < map_width and 0 <= by < map_height:
+                            relic_targets.append((bx, by))
+            relic_targets = list(set(relic_targets))
+        relic_targets = list(set(list(set(relic_targets) - set(self.not_reward_tiles)) + list(self.known_reward_tiles)))
+        # NEW LOGIC: Remove occupied positions (units that are staying put) from relic targets
+        # relic_targets = [t for t in relic_targets if t not in occupied_positions]
+        # Prioritization constants
+        REWARD_BONUS = -50
+        POTENTIAL_RELIC_POINTS = -10
+        NON_REWARD_PENALTY = 0
+        if self.relic_allocation > 0 and len(relic_targets) > 0:
+            relic_units_count = min(self.relic_allocation, len(remaining_units), len(relic_targets))
+            relic_cost_matrix = np.zeros((len(remaining_units), len(relic_targets)), dtype=int)
+            for i, u in enumerate(remaining_units):
+                ux, uy = unit_positions[u]
+                for j, (tx, ty) in enumerate(relic_targets):
+                    dist = abs(ux - tx) + abs(uy - ty)
+                    cost = dist
+                    if (tx, ty) in self.known_reward_tiles:
+                        cost += REWARD_BONUS
+                        # if cost < 0:
+                        #     cost = 0
+                    if (tx, ty) in self.not_reward_tiles:
+                        cost += NON_REWARD_PENALTY
+                    relic_cost_matrix[i, j] = cost
+
+            row_ind, col_ind = linear_sum_assignment(relic_cost_matrix)
+            pairs = sorted(zip(row_ind, col_ind), key=lambda rc: relic_cost_matrix[rc[0], rc[1]])
+
+            assigned_to_relic = set()
+            relic_unit_to_target = {}
+            used_positions = set()
+            for r, c in pairs[:relic_units_count]:
+                u = remaining_units[r]
+                relic_unit_to_target[u] = relic_targets[c]
+                assigned_to_relic.add(u)
+
+            remaining_units = [u for u in remaining_units if u not in assigned_to_relic]
+
+            for u, (tx, ty) in relic_unit_to_target.items():
+                ux, uy = unit_positions[u]
+                if ux == tx and uy == ty:
+                    actions[u] = [0, 0, 0]
+                else:
+                    direction = self.get_direction_via_pathfinding((ux, uy), (tx, ty), obs)
+                    actions[u] = [direction, 0, 0]
+                used_positions.add((tx, ty))
+        return NON_REWARD_PENALTY, REWARD_BONUS, remaining_units
+
     def do_sapping_logic(self, actions, available_unit_ids, enemy_positions, sap_cost, sap_done, sap_range,
                          unit_energy, unit_positions, opp_energy):
         targeted_enemies = set()
@@ -619,8 +698,8 @@ def evaluate_agents(agent_1_cls, agent_2_cls, seed=45, games_to_play=3, replay_s
 
 if __name__ == "__main__":
     # Run evaluation with the dummy Agent against itself
-    evaluate_agents(BestAgentBetterShooter, BestAgent2, games_to_play=20,
-                    replay_save_dir="replays/" + BestAgentBetterShooter.__name__ + "_" + BestAgent2.__name__)
+    evaluate_agents(BestAgent2, BestAgentBetterShooter, games_to_play=20, seed=2,
+                    replay_save_dir="replays/" + BestAgent2.__name__ + "_" + BestAgentBetterShooter.__name__)
 
     # After running, you can check the "replays" directory for saved replay files.
     # You can set breakpoints anywhere in this file or inside the Agent class.
