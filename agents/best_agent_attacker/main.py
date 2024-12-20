@@ -1,11 +1,10 @@
 import json
 from argparse import Namespace
-
+from lux.kit import from_json
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
-
-class BestAgentAttacker:
+class BestAgentBetterShooter:
     def __init__(self, player: str, env_cfg) -> None:
         self.player = player
         self.opp_player = "player_1" if self.player == "player_0" else "player_0"
@@ -270,6 +269,7 @@ class BestAgentAttacker:
 
     def act(self, step: int, obs, remainingOverageTime: int = 60):
         unit_positions = np.array(obs["units"]["position"][self.team_id])
+
         opp_positions = np.array(obs["units"]["position"][self.opp_team_id])
 
         # 1) Update possible reward tiles
@@ -310,180 +310,85 @@ class BestAgentAttacker:
 
         remaining_units = [u for u in available_unit_ids if u not in sap_done]
 
-        NON_REWARD_PENALTY, REWARD_BONUS, remaining_units = self.send_to_relic_points(actions, map_height, map_width,
-                                                                                      obs, remaining_units,
-                                                                                      unit_positions)
-
-
-        if max(obs['team_wins']) <= 0:
-            self.send_to_explore_if_not_going_to_relic(NON_REWARD_PENALTY, REWARD_BONUS, actions, map_height, map_width,
-                                                       obs, remaining_units, unit_positions)
-        else:
-            # This is where I'd like to attack instead.
-            self.send_to_attack_if_not_going_to_relic(NON_REWARD_PENALTY, REWARD_BONUS, actions, map_height, map_width,
-                                                      obs, remaining_units, unit_positions)
-
-
-        # If the match ended, print known relic positions and reward tiles
-        # Do not clear self.known_relic_positions here, so it's usable next game
-        if obs["steps"] == 500 and not self.end_of_match_printed:
-            all_reward_tiles = []
-            for relic_pos, tiles_data in self.relic_tile_data.items():
-                for tile_pos, tile_info in tiles_data.items():
-                    if tile_info["reward_tile"]:
-                        all_reward_tiles.append((relic_pos, tile_pos))
-
-            print("Known relic positions across games:", self.known_relic_positions)
-            print("Known reward tiles at end of match:")
-            for relic_pos, tile_pos in all_reward_tiles:
-                print(f"Relic: {relic_pos}, Reward Tile: {tile_pos}")
-
-            self.end_of_match_printed = True
-
-        # Before returning actions:
-        a = actions[:, 0]  # action codes
-        dx = actions[:, 1]
-        dy = actions[:, 2]
-
-        # Actions that are not "sap" (5) should remain in the original range
-        non_sap_mask = (a != 5)
-        assert np.all(a[non_sap_mask] >= 0), f"Non-sap actions must be >= 0. Got: {a[non_sap_mask]}"
-        assert np.all(a[non_sap_mask] <= 4), f"Non-sap actions must be <= 4. Got: {a[non_sap_mask]}"
-        assert np.all(dx[non_sap_mask] == 0), f"dx must be 0 for non-sap actions. Got: {dx[non_sap_mask]}"
-        assert np.all(dy[non_sap_mask] == 0), f"dy must be 0 for non-sap actions. Got: {dy[non_sap_mask]}"
-
-        # Actions that are "sap" (5) must have dx and dy in [-10, 10]
-        sap_mask = (a == 5)
-        assert np.all(dx[sap_mask] >= -10), f"Sap dx out of range. Got: {dx[sap_mask]}"
-        assert np.all(dx[sap_mask] <= 10), f"Sap dx out of range. Got: {dx[sap_mask]}"
-        assert np.all(dy[sap_mask] >= -10), f"Sap dy out of range. Got: {dy[sap_mask]}"
-        assert np.all(dy[sap_mask] <= 10), f"Sap dy out of range. Got: {dy[sap_mask]}"
-
-        return actions
-
-    def send_to_attack_if_not_going_to_relic(self, NON_REWARD_PENALTY, REWARD_BONUS, actions, map_height, map_width,
-                                             obs, remaining_units, unit_positions):
-        if len(remaining_units) == 0:
-            return
-
-        # Determine enemy spawn corner based on our team_id or known game logic.
-        # Example: If we are team 0 starting near (0,0), enemy is at (map_width-1, map_height-1).
-        # If we are team 1 starting near (map_width-1,map_height-1), enemy is at (0,0).
-        if self.team_id == 0:
-            enemy_corner_x, enemy_corner_y = map_width - 1, map_height - 1
-        else:
-            enemy_corner_x, enemy_corner_y = 0, 0
-
-        # We will create a set of target positions near the enemy corner.
-        # Similar logic as exploration, but focused on the enemy quadrant.
-        still_num_units = len(remaining_units)
-
-        # Let's try a grid of targets around the enemy corner. For example,
-        # we can create a smaller grid (like rows x cols) near enemy corner.
-        # The size of this grid might depend on how many units we have.
-        rows = int(np.floor(np.sqrt(still_num_units)))
-        cols = int(np.ceil(still_num_units / rows))
-        while rows * cols < still_num_units:
-            cols += 1
-
-        # Define how large the "attack staging area" is. For instance, a 1/3 portion of the map
-        # closer to the enemy corner could be chosen as the area we distribute targets in.
-        # This is arbitrary and can be tuned. For example:
-        # If enemy is bottom-right, we'll pick a sub-area in the bottom-right quadrant.
-        # If enemy is top-left, do the opposite. We'll just center around enemy_corner_x, enemy_corner_y.
-        # Let's say we form a grid around that corner within some offset.
-        offset_x = max(map_width // 4, 1)  # a quarter of the map width
-        offset_y = max(map_height // 4, 1) # a quarter of the map height
-
-        # Based on where the enemy corner is, define a bounding rectangle for targets.
-        # If enemy is bottom-right corner:
-        min_x = max(0, enemy_corner_x - offset_x)
-        max_x = min(map_width - 1, enemy_corner_x)
-        min_y = max(0, enemy_corner_y - offset_y)
-        max_y = min(map_height - 1, enemy_corner_y)
-
-        # If enemy is top-left corner:
-        # (If self.team_id == 1, we already set enemy_corner_x,y = 0,0)
-        # The above min_x,max_x,min_y,max_y should still work, just reversed.
-        # For example, if enemy_corner_x = 0, then max_x might be offset_x and so forth.
-        if enemy_corner_x < map_width // 2:
-            # Enemy is on the left side, so let's spread on the left.
-            max_x = min(map_width - 1, enemy_corner_x + offset_x)
-            min_x = max(0, enemy_corner_x)
-        if enemy_corner_y < map_height // 2:
-            # Enemy is on the top side, so let's spread on the top.
-            max_y = min(map_height - 1, enemy_corner_y + offset_y)
-            min_y = max(0, enemy_corner_y)
-
-        # Compute cell width/height for the grid in the defined bounding rectangle
-        region_width = max_x - min_x + 1
-        region_height = max_y - min_y + 1
-        cell_width = region_width / cols if cols > 0 else region_width
-        cell_height = region_height / rows if rows > 0 else region_height
-
-        assigned_cell_count = min(still_num_units, rows * cols)
-        targets = []
-        for i in range(assigned_cell_count):
-            r = i // cols
-            c = i % cols
-            cell_center_x = int(min_x + (c + 0.5) * cell_width)
-            cell_center_y = int(min_y + (r + 0.5) * cell_height)
-            cell_center_x = min(cell_center_x, map_width - 1)
-            cell_center_y = min(cell_center_y, map_height - 1)
-            targets.append((cell_center_x, cell_center_y))
-
-        num_remaining = still_num_units
-        used_cell_count = min(num_remaining, assigned_cell_count)
-        if used_cell_count == 0:
-            # No targets assigned, stay put
-            for u in remaining_units:
+        # NEW LOGIC: Identify units already on a reward tile.
+        already_on_reward_units = []
+        occupied_positions = set()
+        for u in remaining_units:
+            ux, uy = unit_positions[u]
+            if (ux, uy) in self.known_reward_tiles:
+                # If the unit is on a reward tile, do not move it.
                 actions[u] = [0, 0, 0]
-            return
+                already_on_reward_units.append(u)
+                occupied_positions.add((ux, uy))
 
-        # Build a cost matrix for Hungarian assignment
-        cost_matrix = np.zeros((num_remaining, used_cell_count), dtype=int)
-        for i, unit_id in enumerate(remaining_units):
-            ux, uy = unit_positions[unit_id]
-            for j in range(used_cell_count):
-                tx, ty = targets[j]
-                dist = abs(ux - tx) + abs(uy - ty)
-                cost = dist
-                # If desired, adjust cost based on known tiles:
-                if (tx, ty) in self.known_reward_tiles:
-                    cost += REWARD_BONUS
-                    if cost < 0:
-                        cost = 0
-                if (tx, ty) in self.not_reward_tiles:
-                    cost += NON_REWARD_PENALTY
-                cost_matrix[i, j] = cost
+        # NEW LOGIC: If a unit is already on a reward tile, let it stay there.
+        already_on_reward_units = []
+        for u in remaining_units:
+            ux, uy = unit_positions[u]
+            if (ux, uy) in self.known_reward_tiles:
+                # If the unit is on a reward tile, do not move it.
+                actions[u] = [0, 0, 0]
+                already_on_reward_units.append(u)
 
-        row_ind, col_ind = linear_sum_assignment(cost_matrix)
-        unit_to_target = {}
-        for r, c in zip(row_ind, col_ind):
-            unit_id = remaining_units[r]
-            tx, ty = targets[c]
-            unit_to_target[unit_id] = (tx, ty)
+        # Remove these units from the remaining pool so they are not reassigned.
+        # remaining_units = [u for u in remaining_units if u not in already_on_reward_units]
+        relic_targets = list(self.known_relic_positions)
+        if len(self.known_relic_positions) > 0:
+            block_radius = 2
+            for (rx, ry) in self.known_relic_positions:
+                for bx in range(rx - block_radius, rx + block_radius + 1):
+                    for by in range(ry - block_radius, ry + block_radius + 1):
+                        if 0 <= bx < map_width and 0 <= by < map_height:
+                            relic_targets.append((bx, by))
+            relic_targets = list(set(relic_targets))
 
-        assigned_units = set(unit_to_target.keys())
-        unassigned_units = set(remaining_units) - assigned_units
+        relic_targets = list(set(list(set(relic_targets) - set(self.not_reward_tiles)) + list(self.known_reward_tiles)))
 
-        # Assign moves towards targets
-        for unit_id, (tx, ty) in unit_to_target.items():
-            ux, uy = unit_positions[unit_id]
-            if ux == tx and uy == ty:
-                # Already at target, hold position (or consider a "sap" or another action)
-                actions[unit_id] = [0, 0, 0]
-            else:
-                direction = self.get_direction_via_pathfinding((ux, uy), (tx, ty), obs)
-                actions[unit_id] = [direction, 0, 0]
+        # NEW LOGIC: Remove occupied positions (units that are staying put) from relic targets
+        # relic_targets = [t for t in relic_targets if t not in occupied_positions]
+        # Prioritization constants
+        REWARD_BONUS = -50
+        POTENTIAL_RELIC_POINTS = -10
+        NON_REWARD_PENALTY = 0
 
-        # Any unassigned units can idle
-        for unit_id in unassigned_units:
-            actions[unit_id] = [0, 0, 0]
+        if self.relic_allocation > 0 and len(relic_targets) > 0:
+            relic_units_count = min(self.relic_allocation, len(remaining_units), len(relic_targets))
+            relic_cost_matrix = np.zeros((len(remaining_units), len(relic_targets)), dtype=int)
+            for i, u in enumerate(remaining_units):
+                ux, uy = unit_positions[u]
+                for j, (tx, ty) in enumerate(relic_targets):
+                    dist = abs(ux - tx) + abs(uy - ty)
+                    cost = dist
+                    if (tx, ty) in self.known_reward_tiles:
+                        cost += REWARD_BONUS
+                        # if cost < 0:
+                        #     cost = 0
+                    if (tx, ty) in self.not_reward_tiles:
+                        cost += NON_REWARD_PENALTY
+                    relic_cost_matrix[i, j] = cost
 
+            row_ind, col_ind = linear_sum_assignment(relic_cost_matrix)
+            pairs = sorted(zip(row_ind, col_ind), key=lambda rc: relic_cost_matrix[rc[0], rc[1]])
 
-    def send_to_explore_if_not_going_to_relic(self, NON_REWARD_PENALTY, REWARD_BONUS, actions, map_height, map_width,
-                                              obs, remaining_units, unit_positions):
+            assigned_to_relic = set()
+            relic_unit_to_target = {}
+            used_positions = set()
+            for r, c in pairs[:relic_units_count]:
+                u = remaining_units[r]
+                relic_unit_to_target[u] = relic_targets[c]
+                assigned_to_relic.add(u)
+
+            remaining_units = [u for u in remaining_units if u not in assigned_to_relic]
+
+            for u, (tx, ty) in relic_unit_to_target.items():
+                ux, uy = unit_positions[u]
+                if ux == tx and uy == ty:
+                    actions[u] = [0, 0, 0]
+                else:
+                    direction = self.get_direction_via_pathfinding((ux, uy), (tx, ty), obs)
+                    actions[u] = [direction, 0, 0]
+                used_positions.add((tx, ty))
+
         if len(remaining_units) > 0:
             still_num_units = len(remaining_units)
             rows = int(np.floor(np.sqrt(still_num_units)))
@@ -493,7 +398,7 @@ class BestAgentAttacker:
 
             cell_width = self.env_cfg["map_width"] / cols
             cell_height = self.env_cfg["map_height"] / rows
-            assigned_cell_count = min(still_num_units, rows * cols)
+            assigned_cell_count = min(still_num_units, rows*cols)
             targets = []
             for i in range(assigned_cell_count):
                 r = i // cols
@@ -506,6 +411,7 @@ class BestAgentAttacker:
 
             # NEW LOGIC: Remove occupied positions from general targets as well
             # targets = [t for t in targets if t not in occupied_positions]
+
             num_remaining = still_num_units
             used_cell_count = min(num_remaining, assigned_cell_count)
             if used_cell_count == 0:
@@ -548,81 +454,43 @@ class BestAgentAttacker:
                 for unit_id in unassigned_units:
                     actions[unit_id] = [0, 0, 0]
 
-    def send_to_relic_points(self, actions, map_height, map_width, obs, remaining_units, unit_positions):
-        # NEW LOGIC: Identify units already on a reward tile.
-        already_on_reward_units = []
-        occupied_positions = set()
-        for u in remaining_units:
-            ux, uy = unit_positions[u]
-            if (ux, uy) in self.known_reward_tiles:
-                # If the unit is on a reward tile, do not move it.
-                actions[u] = [0, 0, 0]
-                already_on_reward_units.append(u)
-                occupied_positions.add((ux, uy))
-        # NEW LOGIC: If a unit is already on a reward tile, let it stay there.
-        already_on_reward_units = []
-        for u in remaining_units:
-            ux, uy = unit_positions[u]
-            if (ux, uy) in self.known_reward_tiles:
-                # If the unit is on a reward tile, do not move it.
-                actions[u] = [0, 0, 0]
-                already_on_reward_units.append(u)
-        # Remove these units from the remaining pool so they are not reassigned.
-        # remaining_units = [u for u in remaining_units if u not in already_on_reward_units]
-        relic_targets = list(self.known_relic_positions)
-        if len(self.known_relic_positions) > 0:
-            block_radius = 2
-            for (rx, ry) in self.known_relic_positions:
-                for bx in range(rx - block_radius, rx + block_radius + 1):
-                    for by in range(ry - block_radius, ry + block_radius + 1):
-                        if 0 <= bx < map_width and 0 <= by < map_height:
-                            relic_targets.append((bx, by))
-            relic_targets = list(set(relic_targets))
-        relic_targets = list(set(list(set(relic_targets) - set(self.not_reward_tiles)) + list(self.known_reward_tiles)))
-        # NEW LOGIC: Remove occupied positions (units that are staying put) from relic targets
-        # relic_targets = [t for t in relic_targets if t not in occupied_positions]
-        # Prioritization constants
-        REWARD_BONUS = -50
-        POTENTIAL_RELIC_POINTS = -10
-        NON_REWARD_PENALTY = 0
-        if self.relic_allocation > 0 and len(relic_targets) > 0:
-            relic_units_count = min(self.relic_allocation, len(remaining_units), len(relic_targets))
-            relic_cost_matrix = np.zeros((len(remaining_units), len(relic_targets)), dtype=int)
-            for i, u in enumerate(remaining_units):
-                ux, uy = unit_positions[u]
-                for j, (tx, ty) in enumerate(relic_targets):
-                    dist = abs(ux - tx) + abs(uy - ty)
-                    cost = dist
-                    if (tx, ty) in self.known_reward_tiles:
-                        cost += REWARD_BONUS
-                        # if cost < 0:
-                        #     cost = 0
-                    if (tx, ty) in self.not_reward_tiles:
-                        cost += NON_REWARD_PENALTY
-                    relic_cost_matrix[i, j] = cost
+        # If the match ended, print known relic positions and reward tiles
+        # Do not clear self.known_relic_positions here, so it's usable next game
+        if obs["steps"] == 500 and not self.end_of_match_printed:
+            all_reward_tiles = []
+            for relic_pos, tiles_data in self.relic_tile_data.items():
+                for tile_pos, tile_info in tiles_data.items():
+                    if tile_info["reward_tile"]:
+                        all_reward_tiles.append((relic_pos, tile_pos))
 
-            row_ind, col_ind = linear_sum_assignment(relic_cost_matrix)
-            pairs = sorted(zip(row_ind, col_ind), key=lambda rc: relic_cost_matrix[rc[0], rc[1]])
+            print("Known relic positions across games:", self.known_relic_positions)
+            print("Known reward tiles at end of match:")
+            for relic_pos, tile_pos in all_reward_tiles:
+                print(f"Relic: {relic_pos}, Reward Tile: {tile_pos}")
 
-            assigned_to_relic = set()
-            relic_unit_to_target = {}
-            used_positions = set()
-            for r, c in pairs[:relic_units_count]:
-                u = remaining_units[r]
-                relic_unit_to_target[u] = relic_targets[c]
-                assigned_to_relic.add(u)
+            self.end_of_match_printed = True
 
-            remaining_units = [u for u in remaining_units if u not in assigned_to_relic]
+        # Before returning actions:
+        a = actions[:, 0]  # action codes
+        dx = actions[:, 1]
+        dy = actions[:, 2]
 
-            for u, (tx, ty) in relic_unit_to_target.items():
-                ux, uy = unit_positions[u]
-                if ux == tx and uy == ty:
-                    actions[u] = [0, 0, 0]
-                else:
-                    direction = self.get_direction_via_pathfinding((ux, uy), (tx, ty), obs)
-                    actions[u] = [direction, 0, 0]
-                used_positions.add((tx, ty))
-        return NON_REWARD_PENALTY, REWARD_BONUS, remaining_units
+        # Actions that are not "sap" (5) should remain in the original range
+        non_sap_mask = (a != 5)
+        assert np.all(a[non_sap_mask] >= 0), f"Non-sap actions must be >= 0. Got: {a[non_sap_mask]}"
+        assert np.all(a[non_sap_mask] <= 4), f"Non-sap actions must be <= 4. Got: {a[non_sap_mask]}"
+        assert np.all(dx[non_sap_mask] == 0), f"dx must be 0 for non-sap actions. Got: {dx[non_sap_mask]}"
+        assert np.all(dy[non_sap_mask] == 0), f"dy must be 0 for non-sap actions. Got: {dy[non_sap_mask]}"
+
+        # Actions that are "sap" (5) must have dx and dy in [-10, 10]
+        sap_mask = (a == 5)
+        assert np.all(dx[sap_mask] >= -10), f"Sap dx out of range. Got: {dx[sap_mask]}"
+        assert np.all(dx[sap_mask] <= 10), f"Sap dx out of range. Got: {dx[sap_mask]}"
+        assert np.all(dy[sap_mask] >= -10), f"Sap dy out of range. Got: {dy[sap_mask]}"
+        assert np.all(dy[sap_mask] <= 10), f"Sap dy out of range. Got: {dy[sap_mask]}"
+
+        actions = actions.astype(np.int32)
+        return actions
 
     def send_toward_relic_areas(self, actions, available_unit_ids, map_height, map_width, obs, sap_done,
                                 unit_positions):
@@ -751,20 +619,10 @@ class BestAgentAttacker:
             if (rx, ry) not in self.known_relic_positions:
                 self.known_relic_positions.append((rx, ry))
 
-def from_json(state):
-    if isinstance(state, list):
-        return np.array(state)
-    elif isinstance(state, dict):
-        out = {}
-        for k in state:
-            out[k] = from_json(state[k])
-        return out
-    else:
-        return state
 
 ### DO NOT REMOVE THE FOLLOWING CODE ###
 agent_dict = dict() # store potentially multiple dictionaries as kaggle imports code directly
-
+agent_prev_obs = dict()
 def agent_fn(observation, configurations):
     """
     agent definition for kaggle submission.
@@ -777,11 +635,10 @@ def agent_fn(observation, configurations):
     player = observation.player
     remainingOverageTime = observation.remainingOverageTime
     if step == 0:
-        agent_dict[player] = BestAgentAttacker(player, configurations["env_cfg"])
+        agent_dict[player] = BestAgentBetterShooter(player, configurations["env_cfg"])
     agent = agent_dict[player]
     actions = agent.act(step, from_json(obs), remainingOverageTime)
     return dict(action=actions.tolist())
-
 if __name__ == "__main__":
 
     def read_input():

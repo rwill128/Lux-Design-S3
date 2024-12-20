@@ -360,6 +360,7 @@ class BestAgentAttacker:
         assert np.all(dy[sap_mask] >= -10), f"Sap dy out of range. Got: {dy[sap_mask]}"
         assert np.all(dy[sap_mask] <= 10), f"Sap dy out of range. Got: {dy[sap_mask]}"
 
+        actions = actions.astype(np.int32)
         return actions
 
     def send_to_attack_if_not_going_to_relic(self, NON_REWARD_PENALTY, REWARD_BONUS, actions, map_height, map_width,
