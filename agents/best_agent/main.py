@@ -253,6 +253,11 @@ class BestAgent:
         self.last_team_points = current_team_points
         self.last_gain = gain  # Store current gain for next turn
 
+        self.last_unit_positions = []
+        for uid in np.where(obs["units_mask"][self.team_id])[0]:
+            ux, uy = obs["units"]["position"][self.team_id][uid]
+            self.last_unit_positions.append((ux, uy))
+
         # Print current categorization results
         print("\n Time step:", obs["steps"])
         print("Possible Tiles:", len(self.possible_reward_tiles))
@@ -376,12 +381,7 @@ class BestAgent:
 
         # Return if no units
         if num_units == 0:
-            self.last_team_points = current_team_points
-            self.last_unit_positions = []
-            for uid in np.where(obs["units_mask"][self.team_id])[0]:
-                ux, uy = obs["units"]["position"][self.team_id][uid]
-                self.last_unit_positions.append((ux, uy))
-            return actions
+            return actions.tolist()
 
         map_width = self.env_cfg["map_width"]
         map_height = self.env_cfg["map_height"]
@@ -395,8 +395,6 @@ class BestAgent:
             if (ex, ey) not in enemy_positions:
                 enemy_positions[(ex, ey)] = []
             enemy_positions[(ex, ey)].append(oid)
-
-        actions = np.zeros((self.env_cfg["max_units"], 3), dtype=int)
 
         # We'll keep track of enemy positions already targeted this turn to avoid overkill
         targeted_enemies = set()
@@ -438,12 +436,7 @@ class BestAgent:
         # remaining_units = [u for u in remaining_units if u not in already_on_reward_units]
 
         if len(remaining_units) == 0:
-            self.last_team_points = current_team_points
-            self.last_unit_positions = []
-            for uid in np.where(obs["units_mask"][self.team_id])[0]:
-                ux, uy = obs["units"]["position"][self.team_id][uid]
-                self.last_unit_positions.append((ux, uy))
-            return actions
+            return actions.tolist()
 
         relic_targets = list(self.known_relic_positions)
         if len(self.known_relic_positions) > 0:
@@ -569,12 +562,6 @@ class BestAgent:
                 for unit_id in unassigned_units:
                     actions[unit_id] = [0, 0, 0]
 
-        self.last_team_points = current_team_points
-        self.last_unit_positions = []
-        for uid in np.where(obs["units_mask"][self.team_id])[0]:
-            ux, uy = obs["units"]["position"][self.team_id][uid]
-            self.last_unit_positions.append((ux, uy))
-
         # If the match ended, print known relic positions and reward tiles
         # Do not clear self.known_relic_positions here, so it's usable next game
         if obs["steps"] == 500 and not self.end_of_match_printed:
@@ -591,9 +578,7 @@ class BestAgent:
 
             self.end_of_match_printed = True
 
-        # Convert actions to JAX-compatible format
-        actions = {k: jnp.array(v) for k, v in actions.items()}
-        return self.jax_env.step(actions)
+        return actions
 
     def do_sapping_logic(self, actions, available_unit_ids, enemy_positions, sap_cost, sap_done, sap_range,
                          targeted_enemies, unit_energy, unit_positions):
