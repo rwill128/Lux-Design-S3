@@ -182,12 +182,8 @@ class RelicHuntingShootingAgent:
 
         # We have the same number of reward squares
         if gain == 0:
-            # No point gain means no unknown tile contributed points this turn
-            # Thus all unknown tiles occupied last turn are not reward
-            self.not_reward_tiles.update(self.last_unknown_occupied)
-            # If currently occupied unknown tiles were also occupied last turn with no gain,
-            # they are also not reward
-            self.not_reward_tiles.update(occupied_this_turn.intersection(self.last_unknown_occupied))
+            # No point gain means all occupied tiles are not reward tiles
+            self.not_reward_tiles.update(occupied_this_turn)
             self.unknown_tiles -= self.not_reward_tiles
 
         if gain_rate == 0:
