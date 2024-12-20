@@ -105,7 +105,7 @@ class RelicHuntingShootingAgent:
         # ... unchanged ...
         if from_pos == to_pos:
             return 0  # Already at target
-        path = self.bfs_pathfind(self.env_cfg["map_width"], self.env_cfg["map_height"], from_pos, to_pos, obs)
+        path = self.dijkstra_pathfind(self.env_cfg["map_width"], self.env_cfg["map_height"], from_pos, to_pos, obs)
         if path is None or len(path) < 2:
             return self.simple_heuristic_move(from_pos, to_pos)
         next_step = path[1]
@@ -276,6 +276,72 @@ class RelicHuntingShootingAgent:
         currently_unknown = self.possible_reward_tiles - self.known_reward_tiles - self.not_reward_tiles
         self.unknown_tiles = currently_unknown
 
+    def dijkstra_pathfind(self, map_width, map_height, start, goal, obs):
+        sensor_mask = obs["sensor_mask"]
+        tile_type_map = obs["map_features"]["tile_type"]
+        tile_energy_map = obs["map_features"]["energy"]
+
+        def is_passable(x, y):
+            if x < 0 or x >= map_width or y < 0 or y >= map_height:
+                return False
+            if sensor_mask[x, y]:
+                # Visible tile
+                if tile_type_map[x, y] == 2:  # Asteroid
+                    return False
+                return True
+            else:
+                # Unknown tile, assume passable
+                return True
+
+        import heapq
+        dist = {(start): 0}
+        came_from = {start: None}
+        pq = [(0, start)]  # priority queue with tuples (cost, position)
+
+        while pq:
+            current_dist, current = heapq.heappop(pq)
+            if current == goal:
+                # Reconstruct path
+                path = []
+                while current is not None:
+                    path.append(current)
+                    current = came_from[current]
+                path.reverse()
+                return path
+
+            if current_dist > dist[current]:
+                continue  # Already found a better path
+
+            (cx, cy) = current
+            for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
+                nx, ny = cx+dx, cy+dy
+                if 0 <= nx < map_width and 0 <= ny < map_height and is_passable(nx, ny):
+                    # Calculate the step cost using tile energy
+                    tile_cost = 10 - tile_energy_map[nx, ny]
+                    # Floor at 0
+                    if tile_cost < 0:
+                        tile_cost = 0
+
+                    new_dist = current_dist + tile_cost
+                    if (nx, ny) not in dist or new_dist < dist[(nx, ny)]:
+                        dist[(nx, ny)] = new_dist
+                        came_from[(nx, ny)] = (cx, cy)
+                        heapq.heappush(pq, (new_dist, (nx, ny)))
+
+        return None  # No path found
+
+    def get_direction_via_pathfinding(self, from_pos, to_pos, obs):
+        if from_pos == to_pos:
+            return 0  # Already at target
+        path = self.dijkstra_pathfind(self.env_cfg["map_width"], self.env_cfg["map_height"], from_pos, to_pos, obs)
+        if path is None or len(path) < 2:
+            return self.simple_heuristic_move(from_pos, to_pos)
+        next_step = path[1]
+        dx = next_step[0] - from_pos[0]
+        dy = next_step[1] - from_pos[1]
+        return self.dxdy_to_action(dx, dy)
+
+
     def act(self, step: int, obs, remainingOverageTime: int = 60):
         unit_mask = np.array(obs["units_mask"][self.team_id])
         unit_positions = np.array(obs["units"]["position"][self.team_id])
@@ -403,6 +469,7 @@ class RelicHuntingShootingAgent:
 
         # Prioritization constants
         REWARD_BONUS = -50
+        POTENTIAL_RELIC_POINTS = -10
         NON_REWARD_PENALTY = 0
 
         if self.relic_allocation > 0 and len(relic_targets) > 0:
