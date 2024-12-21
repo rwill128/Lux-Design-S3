@@ -195,6 +195,20 @@ class BestAgentAttacker:
         self.last_gain = gain  # Store current gain for next turn
 
         self.last_unit_positions = []
+        
+        # Log state after deduction
+        debug_state_after = {
+            "possible_reward_tiles": list(self.possible_reward_tiles),
+            "unknown_tiles": list(self.unknown_tiles),
+            "not_reward_tiles": list(self.not_reward_tiles),
+            "known_reward_tiles": list(self.known_reward_tiles),
+            "last_reward_occupied": list(self.last_reward_occupied),
+            "last_unknown_occupied": list(self.last_unknown_occupied),
+            "last_team_points": self.last_team_points,
+            "last_gain": self.last_gain,
+            "last_unit_positions": self.last_unit_positions
+        }
+        print(f"DEBUG_LOG_AFTER: {json.dumps({'obs': obs, 'agent_state': debug_state_after})}")
         for uid in np.where(obs["units_mask"][self.team_id])[0]:
             ux, uy = obs["units"]["position"][self.team_id][uid]
             self.last_unit_positions.append((ux, uy))

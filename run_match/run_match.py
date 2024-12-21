@@ -55,7 +55,7 @@ if __name__ == "__main__":
     # Run evaluation with the dummy Agent against itself
     # Import agents
     from submissions.best_agent_attacker import BestAgentAttacker
-    from run_match.agents import BestAgentBetterShooter
+    from submissions.best_agent_better_shooter import BestAgentBetterShooter
     
     # Run three games with different seeds to capture diverse scenarios
     # Game 1: Baseline scenario
