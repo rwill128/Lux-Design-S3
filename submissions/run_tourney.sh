@@ -12,6 +12,7 @@ luxai-s3 best_agent_attacker_two.py \
          best_agent_attacker_different_deduce.py \
          best_agent_attacker_three.py \
          best_agent_attacker_4.py \
+         best_agent_attacker_five.py \
          best_agent_attacker_no_nebula.py \
          best_agent_attacker_no_nebula_two.py \
          best_agent_attacker_no_nebula_different_explore_no_attack.py \

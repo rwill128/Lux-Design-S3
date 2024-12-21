@@ -304,7 +304,7 @@ class BestAgentAttackerFive:
                 if tile_type_map[x, y] == 2:  # Asteroid
                     return False
                 # Check for nebulas - only passable if near relics
-                if obs["board"]["nebulas"][y, x]:
+                if tile_type_map[x, y] == 1:
                     relic_nodes_mask = obs["relic_nodes_mask"]
                     relic_nodes = obs["relic_nodes"][relic_nodes_mask]
                     for rx, ry in relic_nodes:
@@ -356,7 +356,7 @@ class BestAgentAttackerFive:
                     tile_cost += visit_penalty
                     
                     # Add nebula penalty if not near relic
-                    if obs["board"]["nebulas"][ny, nx]:
+                    if tile_type_map[nx, ny] == 1:
                         relic_nodes_mask = obs["relic_nodes_mask"]
                         relic_nodes = obs["relic_nodes"][relic_nodes_mask]
                         near_relic = False
