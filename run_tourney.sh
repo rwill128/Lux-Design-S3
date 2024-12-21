@@ -19,6 +19,7 @@ luxai-s3 agents/baseline_agent/main.py \
          submissions/relic_optimizer_with_reward_deducing_logic.py \
          submissions/relic_optimizer_without_tile_detection.py \
          submissions/best_agent.py \
+         submissions/best_agent_no_nebula.py \
          submissions/best_agent_better_shooter.py \
          agents/better_shooting_vision_agent/main.py \
          agents/roles_based_agent/main.py \
