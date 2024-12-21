@@ -38,17 +38,17 @@ def setup_logging(log_file, log_level):
     
     return logger
 
-def evaluate_agents(agent_1_cls, agent_2_cls, seed=45, games_to_play=3, replay_save_dir="replays", log_level="DEBUG", log_file="logs/matches/match.log"):
+def evaluate_agents(agent_1_cls, agent_2_cls, seed=45, games_to_play=3, max_steps=1000, replay_save_dir="replays", log_level="DEBUG", log_file="logs/matches/match.log"):
     # Ensure directories exist
     os.makedirs(replay_save_dir, exist_ok=True)
     os.makedirs(os.path.dirname(log_file), exist_ok=True)
 
     # Setup logging
     logger = setup_logging(log_file, log_level)
-    logger.info(f"Starting evaluation with seed {seed}")
+    logger.info(f"Starting evaluation with seed {seed} and max_steps {max_steps}")
 
     # Create an environment wrapped to record episodes
-    gym_env = LuxAIS3GymEnv(numpy_output=True)  # Initialize environment
+    gym_env = LuxAIS3GymEnv(numpy_output=True, max_episode_steps=max_steps)  # Initialize environment with max steps
     gym_env.render_mode = "human"
     env = RecordEpisode(
         gym_env, save_on_close=True, save_on_reset=True, save_dir=replay_save_dir
@@ -85,6 +85,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
     parser.add_argument('--num_games', type=int, default=1, help='Number of games to play')
+    parser.add_argument('--max_steps', type=int, default=50, help='Maximum steps per game')
     parser.add_argument('--log_level', default='DEBUG', help='Logging level')
     parser.add_argument('--log_file', default='logs/matches/match.log', help='Log file path')
     parser.add_argument('--replay_dir', default='logs/matches', help='Directory to save replay files')
@@ -106,6 +107,7 @@ if __name__ == "__main__":
         BestAgentBetterShooter,
         seed=args.seed,
         games_to_play=args.num_games,
+        max_steps=args.max_steps,
         replay_save_dir=args.replay_dir,
         log_level=args.log_level,
         log_file=args.log_file
