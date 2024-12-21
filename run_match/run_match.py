@@ -1151,22 +1151,6 @@ class BestAgentAttacker:
             self.send_to_attack_if_not_going_to_relic(NON_REWARD_PENALTY, REWARD_BONUS, actions, map_height, map_width,
                                                       obs, remaining_units, unit_positions)
 
-        # If the match ended, print known relic positions and reward tiles
-        # Do not clear self.known_relic_positions here, so it's usable next game
-        if obs["steps"] == 500 and not self.end_of_match_printed:
-            all_reward_tiles = []
-            for relic_pos, tiles_data in self.relic_tile_data.items():
-                for tile_pos, tile_info in tiles_data.items():
-                    if tile_info["reward_tile"]:
-                        all_reward_tiles.append((relic_pos, tile_pos))
-
-            print("Known relic positions across games:", self.known_relic_positions)
-            print("Known reward tiles at end of match:")
-            for relic_pos, tile_pos in all_reward_tiles:
-                print(f"Relic: {relic_pos}, Reward Tile: {tile_pos}")
-
-            self.end_of_match_printed = True
-
         # Before returning actions:
         a = actions[:, 0]  # action codes
         dx = actions[:, 1]
