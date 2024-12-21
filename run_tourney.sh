@@ -23,6 +23,6 @@ luxai-s3 agents/baseline_agent/main.py \
          agents/newest_agent/main.py \
          agents/best_agent/main.py \
          agents/best_agent_attacker/main.py \
-          --tournament --output "$OUTPUT_DIR/replay.json" --replay.no-compressed-obs --verbose 3 --tournament-cfg-max-episodes 500 --tournament-cfg-concurrent 15
+        --tournament --output "$OUTPUT_DIR/replay.json" --replay.no-compressed-obs --verbose 3 --tournament-cfg-max-episodes 5000 --tournament-cfg-concurrent 15
 
 echo "Replay saved to: $OUTPUT_DIR/replay.json"
