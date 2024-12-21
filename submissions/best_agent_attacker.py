@@ -77,6 +77,16 @@ class BestAgentAttacker:
         return reward_tiles, untested_tiles
 
     def deduce_reward_tiles(self, obs):
+        # Convert numpy arrays to lists for JSON serialization
+        def convert_np_arrays(obj):
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            elif isinstance(obj, dict):
+                return {k: convert_np_arrays(v) for k, v in obj.items()}
+            elif isinstance(obj, (list, tuple)):
+                return [convert_np_arrays(i) for i in obj]
+            return obj
+
         # Log state before deduction
         debug_state_before = {
             "possible_reward_tiles": list(self.possible_reward_tiles),
@@ -89,7 +99,8 @@ class BestAgentAttacker:
             "last_gain": self.last_gain,
             "last_unit_positions": self.last_unit_positions
         }
-        print(f"DEBUG_LOG_BEFORE: {json.dumps({'obs': obs, 'agent_state': debug_state_before})}")
+        obs_serializable = convert_np_arrays(obs)
+        print(f"DEBUG_LOG_BEFORE: {json.dumps({'obs': obs_serializable, 'agent_state': debug_state_before})}")
 
         # Current points
         current_team_points = obs["team_points"][self.team_id]
@@ -230,7 +241,7 @@ class BestAgentAttacker:
                 "gain_rate": gain_rate
             }
         }
-        print(f"DEBUG_LOG_AFTER: {json.dumps({'obs': obs, 'agent_state': debug_state_after})}")
+        print(f"DEBUG_LOG_AFTER: {json.dumps({'obs': obs_serializable, 'agent_state': debug_state_after})}")
 
         # Print current categorization results for human readability
         print("\n Time step:", obs["steps"])
