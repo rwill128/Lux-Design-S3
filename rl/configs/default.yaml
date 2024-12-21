@@ -1,0 +1,38 @@
+# Default configuration for Lux AI Season 3 RL training
+
+# PPO hyperparameters
+ppo:
+  learning_rate: 3.0e-4
+  n_steps: 2048
+  batch_size: 64
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.01
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+
+# Training parameters
+training:
+  device: "cuda" if torch.cuda.is_available() else "cpu"
+  num_series: 1000
+  series_length: 5
+  max_steps: 100
+  eval_interval: 10
+  save_interval: 100
+  curriculum_interval: 200
+  save_dir: "checkpoints"
+  log_dir: "logs"
+
+# Environment parameters
+env:
+  map_size: 24
+  max_units: 4
+  max_steps: 100
+
+# Model architecture
+model:
+  hidden_sizes: [256, 256]
+  activation: "ReLU"
+  use_batch_norm: true
