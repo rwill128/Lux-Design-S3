@@ -6,6 +6,9 @@ from luxai_s3.wrappers import LuxAIS3GymEnv, RecordEpisode
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
+from submissions.best_agent_attacker import BestAgentAttacker
+from submissions.best_agent_better_shooter import BestAgentBetterShooter
+
 def evaluate_agents(agent_1_cls, agent_2_cls, seed=45, games_to_play=3, replay_save_dir="replays"):
     # Ensure the replay directory exists
     os.makedirs(replay_save_dir, exist_ok=True)
