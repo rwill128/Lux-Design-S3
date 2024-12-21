@@ -13,6 +13,8 @@ luxai-s3 submissions/best_agent_attacker_two.py \
          submissions/best_agent_attacker_three.py \
          submissions/best_agent_attacker_4.py \
          submissions/best_agent_attacker_no_nebula.py \
+         submissions/best_agent_attacker_no_nebula_two.py \
+         submissions/best_agent_attacker_no_nebula_different_explore_no_attack.py \
          submissions/best_agent.py \
          submissions/best_agent_no_nebula.py \
          submissions/best_agent_better_shooter.py \

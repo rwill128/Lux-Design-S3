@@ -7,7 +7,7 @@ from scipy.optimize import linear_sum_assignment
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
-class BestAgentAttackerNoNebulaDifferentExplore:
+class BestAgentAttackerNoNebulaDifferentExploreNoAttack:
     def __init__(self, player: str, env_cfg) -> None:
         self.player = player
         self.opp_player = "player_1" if self.player == "player_0" else "player_0"
@@ -306,9 +306,9 @@ class BestAgentAttackerNoNebulaDifferentExplore:
                 remaining_units, unit_positions
             )
         else:
-            self.send_to_attack_if_not_going_to_relic(
+            self.send_to_explore_if_not_going_to_relic(
                 NON_REWARD_PENALTY, REWARD_BONUS, actions,
-                map_height, map_width, obs,
+                obs,
                 remaining_units, unit_positions
             )
 
@@ -731,7 +731,7 @@ def agent_fn(observation, configurations):
     player = observation.player
     remainingOverageTime = observation.remainingOverageTime
     if step == 0:
-        agent_dict[player] = BestAgentAttackerNoNebulaDifferentExplore(player, configurations["env_cfg"])
+        agent_dict[player] = BestAgentAttackerNoNebulaDifferentExploreNoAttack(player, configurations["env_cfg"])
     agent = agent_dict[player]
     actions = agent.act(step, from_json(obs), remainingOverageTime)
     return dict(action=actions.tolist())
