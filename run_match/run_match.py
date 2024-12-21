@@ -1409,7 +1409,7 @@ class BestAgentAttacker:
         # NEW LOGIC: Remove occupied positions (units that are staying put) from relic targets
         # relic_targets = [t for t in relic_targets if t not in occupied_positions]
         # Prioritization constants
-        REWARD_BONUS = -50
+        REWARD_BONUS = -100
         POTENTIAL_RELIC_POINTS = -10
         NON_REWARD_PENALTY = 0
         if self.relic_allocation > 0 and len(relic_targets) > 0:
