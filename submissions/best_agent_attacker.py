@@ -77,6 +77,20 @@ class BestAgentAttacker:
         return reward_tiles, untested_tiles
 
     def deduce_reward_tiles(self, obs):
+        # Log state before deduction
+        debug_state_before = {
+            "possible_reward_tiles": list(self.possible_reward_tiles),
+            "unknown_tiles": list(self.unknown_tiles),
+            "not_reward_tiles": list(self.not_reward_tiles),
+            "known_reward_tiles": list(self.known_reward_tiles),
+            "last_reward_occupied": list(self.last_reward_occupied),
+            "last_unknown_occupied": list(self.last_unknown_occupied),
+            "last_team_points": self.last_team_points,
+            "last_gain": self.last_gain,
+            "last_unit_positions": self.last_unit_positions
+        }
+        print(f"DEBUG_LOG_BEFORE: {json.dumps({'obs': obs, 'agent_state': debug_state_before})}")
+
         # Current points
         current_team_points = obs["team_points"][self.team_id]
         # If current_team_points is a scalar array, convert to python int
@@ -185,7 +199,26 @@ class BestAgentAttacker:
             ux, uy = obs["units"]["position"][self.team_id][uid]
             self.last_unit_positions.append((ux, uy))
 
-        # Print current categorization results
+        # Log state after deduction
+        debug_state_after = {
+            "possible_reward_tiles": list(self.possible_reward_tiles),
+            "unknown_tiles": list(self.unknown_tiles),
+            "not_reward_tiles": list(self.not_reward_tiles),
+            "known_reward_tiles": list(self.known_reward_tiles),
+            "last_reward_occupied": list(self.last_reward_occupied),
+            "last_unknown_occupied": list(self.last_unknown_occupied),
+            "last_team_points": self.last_team_points,
+            "last_gain": self.last_gain,
+            "last_unit_positions": self.last_unit_positions,
+            "point_changes": {
+                "current_points": current_team_points,
+                "gain": gain,
+                "gain_rate": gain_rate
+            }
+        }
+        print(f"DEBUG_LOG_AFTER: {json.dumps({'obs': obs, 'agent_state': debug_state_after})}")
+
+        # Print current categorization results for human readability
         print("\n Time step:", obs["steps"])
         print("Possible Tiles:", len(self.possible_reward_tiles))
         print("Unknown Tiles:", len(self.unknown_tiles))
