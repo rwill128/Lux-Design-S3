@@ -649,6 +649,7 @@ class BestAgentAttacker:
     CONFIDENCE_THRESHOLD = 2  # Threshold for marking as reward tile
     NEGATIVE_THRESHOLD = -2  # Threshold for marking as not reward
     CONFIDENCE_DECAY = 0.8  # Decay factor for confidence between matches
+    CONFIDENCE_WEIGHT = 3  # Weight factor for confidence in pathfinding costs
     
     def __init__(self, player: str, env_cfg) -> None:
         self.player = player
@@ -1259,7 +1260,10 @@ class BestAgentAttacker:
             for j in range(used_cell_count):
                 tx, ty = targets[j]
                 dist = abs(ux - tx) + abs(uy - ty)
-                cost = dist
+                confidence = self.tile_confidence.get((tx, ty), 0)
+                cost = dist - int(confidence * self.CONFIDENCE_WEIGHT)
+                if cost < 0:
+                    cost = 0
                 # If desired, adjust cost based on known tiles:
                 if (tx, ty) in self.known_reward_tiles:
                     cost += REWARD_BONUS
