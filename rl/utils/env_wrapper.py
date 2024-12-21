@@ -9,9 +9,9 @@ This module provides a wrapper around the LuxAIS3GymEnv that implements:
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
-from luxai_s3.env import LuxAIS3GymEnv
 from luxai_s3.state import EnvState
-from luxai_s3.utils import json_to_state_object
+
+from src.luxai_s3.wrappers import LuxAIS3GymEnv
 
 
 class LuxRLWrapper(gym.Wrapper):

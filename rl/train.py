@@ -10,9 +10,8 @@ import os
 import argparse
 from typing import Dict, Any
 import yaml
-import torch
-from luxai_s3.env import LuxAIS3GymEnv
 
+from luxai_s3.wrappers import LuxAIS3GymEnv
 from utils.env_wrapper import LuxRLWrapper
 from agents.ppo_agent import LuxPPOAgent
 from utils.training_manager import SeriesTrainingManager

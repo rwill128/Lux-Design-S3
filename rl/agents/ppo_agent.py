@@ -9,7 +9,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from stable_baselines3 import PPO
 from typing import Dict, Tuple, Optional
 
 class LuxPPOPolicy(nn.Module):
