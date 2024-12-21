@@ -611,6 +611,7 @@ class BestAgentBetterShooter:
 class BestAgentAttacker:
     # Class-level storage for persistent knowledge across matches
     _persistent_tile_confidence = {}  # Maps (x,y) -> confidence score
+    _persistent_tile_experience = {}  # Maps (x,y) -> visit count
     _persistent_relic_patterns = {}  # Maps (rx,ry) -> {possible_patterns}
     _persistent_relic_data = {}  # Maps (rx,ry) -> {(x,y): {"tested": bool, "is_reward": bool}}
     _persistent_known_relics = []  # List of (x, y) relic coordinates
@@ -645,11 +646,15 @@ class BestAgentAttacker:
         self.newly_unoccupied_unknown = set()
         self.newly_unoccupied_known = set()
 
-        # Initialize confidence tracking with persistence
+        # Initialize confidence and experience tracking with persistence
         self.tile_confidence = {}
+        self.tile_experience = {}
         for tile, confidence in self._persistent_tile_confidence.items():
             # Apply decay to persistent confidence
             self.tile_confidence[tile] = confidence * self.CONFIDENCE_DECAY
+
+        for tile, visits in self._persistent_tile_experience.items():
+            self.tile_experience[tile] = visits  # No decay for visit counts
 
         self.relic_tile_data = self._persistent_relic_data.copy()
 
@@ -714,6 +719,10 @@ class BestAgentAttacker:
         occupied_this_turn = set()
         for uid in np.where(unit_mask)[0]:
             x, y = unit_positions[uid]
+            # Track visits for all tiles
+            self.tile_experience[(x, y)] = self.tile_experience.get((x, y), 0) + 1
+            # Update persistent experience
+            self._persistent_tile_experience[(x, y)] = self.tile_experience[(x, y)]
             if (x, y) in self.unknown_tiles:
                 occupied_this_turn.add((x, y))
                 if (x, y) not in self.tile_confidence:
@@ -1081,7 +1090,18 @@ class BestAgentAttacker:
                         tx, ty = targets[j]
                         dist = abs(ux - tx) + abs(uy - ty)
                         confidence = self.tile_confidence.get((tx, ty), 0)
-                        cost = dist - int(confidence * self.CONFIDENCE_WEIGHT)
+                        visit_count = self.tile_experience.get((tx, ty), 0)
+                        # Reduce cost for unvisited tiles
+                        visit_bias = max(5 - visit_count, 0)
+                        # Check proximity to relics
+                        min_relic_dist = float('inf')
+                        for rx, ry in self.known_relic_positions:
+                            relic_dist = abs(tx - rx) + abs(ty - ry)
+                            min_relic_dist = min(min_relic_dist, relic_dist)
+                        # Reduce cost for tiles near relics (within 3 tiles)
+                        relic_bias = max(3 - min_relic_dist, 0) if min_relic_dist <= 3 else 0
+                        # Combine all factors
+                        cost = dist - int(confidence * self.CONFIDENCE_WEIGHT) - visit_bias - relic_bias
                         if cost < 0:
                             cost = 0
                         if (tx, ty) in self.known_reward_tiles:
