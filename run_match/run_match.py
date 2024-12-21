@@ -1,4 +1,7 @@
 import os
+import sys
+import logging
+import argparse
 from collections import defaultdict
 
 from luxai_s3.wrappers import LuxAIS3GymEnv, RecordEpisode
@@ -6,19 +9,46 @@ from luxai_s3.wrappers import LuxAIS3GymEnv, RecordEpisode
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
-import sys
-import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from submissions.best_agent_attacker_no_nebula_different_explore_no_attack import \
-    BestAgentAttackerNoNebulaDifferentExploreNoAttack
+from submissions.best_agent_attacker import BestAgentAttacker
 from submissions.best_agent_better_shooter import BestAgentBetterShooter
 
-def evaluate_agents(agent_1_cls, agent_2_cls, seed=45, games_to_play=3, replay_save_dir="replays"):
-    # Ensure the replay directory exists
+def setup_logging(log_file, log_level):
+    """Configure logging to both file and console."""
+    # Set root logger to WARNING to filter out JAX logs
+    logging.getLogger().setLevel(logging.WARNING)
+    
+    # Create our custom logger for deduce_reward_tiles
+    logger = logging.getLogger('deduce_reward_tiles')
+    logger.setLevel(getattr(logging, log_level.upper()))
+    logger.propagate = False  # Don't propagate to root logger
+    
+    # Create handlers
+    file_handler = logging.FileHandler(log_file)
+    console_handler = logging.StreamHandler()
+    
+    # Create formatters and add it to handlers
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
+    
+    # Add handlers to the logger
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    return logger
+
+def evaluate_agents(agent_1_cls, agent_2_cls, seed=45, games_to_play=3, replay_save_dir="replays", log_level="DEBUG", log_file="logs/matches/match.log"):
+    # Ensure directories exist
     os.makedirs(replay_save_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)
+
+    # Setup logging
+    logger = setup_logging(log_file, log_level)
+    logger.info(f"Starting evaluation with seed {seed}")
 
     # Create an environment wrapped to record episodes
-    gym_env = LuxAIS3GymEnv(numpy_output=True, max_episode_length=100)  # Limit episode length
+    gym_env = LuxAIS3GymEnv(numpy_output=True)  # Initialize environment
     gym_env.render_mode = "human"
     env = RecordEpisode(
         gym_env, save_on_close=True, save_on_reset=True, save_dir=replay_save_dir
@@ -52,23 +82,33 @@ def evaluate_agents(agent_1_cls, agent_2_cls, seed=45, games_to_play=3, replay_s
 
 
 if __name__ == "__main__":
-    # Run evaluation with the dummy Agent against itself
-    # Import agents
-    from submissions.best_agent_attacker import BestAgentAttacker
-    from submissions.best_agent_better_shooter import BestAgentBetterShooter
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--num_games', type=int, default=1, help='Number of games to play')
+    parser.add_argument('--log_level', default='DEBUG', help='Logging level')
+    parser.add_argument('--log_file', default='logs/matches/match.log', help='Log file path')
+    parser.add_argument('--replay_dir', default='logs/matches', help='Directory to save replay files')
     
-    # Run three games with different seeds to capture diverse scenarios
-    # Game 1: Baseline scenario
-    evaluate_agents(BestAgentAttacker, BestAgentBetterShooter, seed=42, games_to_play=1,
-                   replay_save_dir="replays/game_42")
+    args = parser.parse_args()
     
-    # Game 2: Different seed for variety
-    evaluate_agents(BestAgentAttacker, BestAgentBetterShooter, seed=123, games_to_play=1,
-                   replay_save_dir="replays/game_123")
+    # Ensure directories exist
+    os.makedirs(os.path.dirname(args.log_file), exist_ok=True)
+    os.makedirs(args.replay_dir, exist_ok=True)
     
-    # Game 3: Another seed for more scenarios
-    evaluate_agents(BestAgentAttacker, BestAgentBetterShooter, seed=456, games_to_play=1,
-                   replay_save_dir="replays/game_456")
-
-    # After running, you can check the "replays" directory for saved replay files.
-    # You can set breakpoints anywhere in this file or inside the Agent class.
+    # Setup logging
+    setup_logging(args.log_file, args.log_level)
+    logger = logging.getLogger(__name__)
+    logger.info(f"Starting match with seed {args.seed}")
+    
+    # Run games
+    evaluate_agents(
+        BestAgentAttacker,
+        BestAgentBetterShooter,
+        seed=args.seed,
+        games_to_play=args.num_games,
+        replay_save_dir=args.replay_dir,
+        log_level=args.log_level,
+        log_file=args.log_file
+    )
+    
+    logger.info("Match completed")
