@@ -223,7 +223,7 @@ class BestAgentAttacker:
                 return False
             if sensor_mask[x, y]:
                 # Visible tile
-                if tile_type_map[x, y] == 2:  # Asteroid
+                if tile_type_map[x, y] == 2 or tile_type_map[x, y] == 1:  # Asteroid
                     return False
                 return True
             else:
