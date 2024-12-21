@@ -6,7 +6,9 @@ from luxai_s3.wrappers import LuxAIS3GymEnv, RecordEpisode
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
-from submissions.best_agent_attacker_five import BestAgentAttackerFive
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from submissions.best_agent_attacker_no_nebula_different_explore_no_attack import \
     BestAgentAttackerNoNebulaDifferentExploreNoAttack
 from submissions.best_agent_better_shooter import BestAgentBetterShooter
@@ -51,8 +53,20 @@ def evaluate_agents(agent_1_cls, agent_2_cls, seed=45, games_to_play=3, replay_s
 
 if __name__ == "__main__":
     # Run evaluation with the dummy Agent against itself
-    evaluate_agents(BestAgentBetterShooter, BestAgentAttackerFive, games_to_play=20, seed=2,
-                    replay_save_dir="replays/" + BestAgentBetterShooter.__name__ + "_" + BestAgentAttackerFive.__name__)
+    # Run three games with different seeds to capture diverse scenarios
+    from submissions.best_agent_attacker import BestAgentAttacker
+    
+    # Game 1: Baseline scenario
+    evaluate_agents(BestAgentAttacker, BestAgentBetterShooter, games_to_play=1, seed=42,
+                   max_steps=100, replay_save_dir="replays/game_42")
+    
+    # Game 2: Different seed for variety
+    evaluate_agents(BestAgentAttacker, BestAgentBetterShooter, games_to_play=1, seed=123,
+                   max_steps=100, replay_save_dir="replays/game_123")
+    
+    # Game 3: Another seed for more scenarios
+    evaluate_agents(BestAgentAttacker, BestAgentBetterShooter, games_to_play=1, seed=456,
+                   max_steps=100, replay_save_dir="replays/game_456")
 
     # After running, you can check the "replays" directory for saved replay files.
     # You can set breakpoints anywhere in this file or inside the Agent class.
