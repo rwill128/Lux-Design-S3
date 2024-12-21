@@ -35,12 +35,8 @@ class BestAgentAttacker:
         # Confidence tracking for reward tiles
         self.tile_confidence = {}  # (x,y) -> confidence score (0-100)
         self.tile_visit_count = {}  # (x,y) -> number of times visited
-        self.tile_patterns = {}  # pattern_id -> set of (x,y) coordinates
-        self.pattern_confidence = {}  # pattern_id -> confidence score
-        
         # Persistence across games
         self._persistent_tile_confidence = {}  # (x,y) -> confidence score
-        self._persistent_patterns = {}  # pattern_id -> set of (x,y)
         self.known_relic_positions = []  # list of (x,y) relic coordinates
 
     def simple_heuristic_move(self, from_pos, to_pos):
@@ -85,11 +81,10 @@ class BestAgentAttacker:
         return reward_tiles, untested_tiles
 
     def deduce_reward_tiles(self, obs):
-        """Deduce reward tiles with confidence tracking and pattern recognition.
+        """Deduce reward tiles with confidence tracking.
         
         Improvements:
         - Confidence tracking for each tile (0-100)
-        - Pattern recognition for reward tile clusters
         - Better handling of multi-unit movement
         - Persistence between games
         - Enhanced debugging and validation
@@ -104,7 +99,6 @@ class BestAgentAttacker:
         # Load persistent confidence from previous games
         if not self.tile_confidence and self._persistent_tile_confidence:
             self.tile_confidence = self._persistent_tile_confidence.copy()
-            self.tile_patterns = self._persistent_patterns.copy()
 
         # Occupied unknown tiles this turn
         unit_positions = obs["units"]["position"][self.team_id]
@@ -196,23 +190,31 @@ class BestAgentAttacker:
                 pass
                 # assert False, "We lost points but we don't have any newly unoccupied tiles?"
 
-        # Update confidence scores
+        # Update visit counts and confidence scores based on point gains
         for pos in occupied_this_turn:
             self.tile_visit_count[pos] = self.tile_visit_count.get(pos, 0) + 1
             
-            # Increase confidence for reward tiles
+            # Handle confirmed tiles
             if pos in self.known_reward_tiles:
-                self.tile_confidence[pos] = min(100, self.tile_confidence.get(pos, 50) + 10)
-            # Decrease confidence for non-reward tiles
+                # Maximum confidence for confirmed reward tiles
+                self.tile_confidence[pos] = 100
             elif pos in self.not_reward_tiles:
-                self.tile_confidence[pos] = max(0, self.tile_confidence.get(pos, 50) - 10)
+                # Zero confidence for confirmed non-reward tiles
+                self.tile_confidence[pos] = 0
+            else:
+                # For unknown tiles, update based on point gains
+                current_confidence = self.tile_confidence.get(pos, 50)
+                if gain > 0 and len(newly_occupied) == 1 and pos in newly_occupied:
+                    # Single tile caused point gain - high confidence
+                    self.tile_confidence[pos] = 100
+                elif gain == 0 and pos in newly_occupied:
+                    # No points gained from new tile - decrease confidence
+                    visits = self.tile_visit_count[pos]
+                    decay = min(20, 5 * visits)  # Increasing decay with visits, capped at 20
+                    self.tile_confidence[pos] = max(0, current_confidence - decay)
             
-        # Update pattern recognition
-        self._update_reward_patterns(obs)
-        
-        # Persist confidence and patterns
+        # Persist confidence
         self._persistent_tile_confidence = self.tile_confidence.copy()
-        self._persistent_patterns = self.tile_patterns.copy()
         
         # Update tracking
         self.last_reward_occupied = currently_reward_occupied
@@ -234,33 +236,7 @@ class BestAgentAttacker:
         if len(self.known_reward_tiles) > 0:
             print("Known Rewards:", self.known_reward_tiles)
             print("Confidence Scores:", {pos: self.tile_confidence.get(pos, 0) for pos in self.known_reward_tiles})
-        print("Active Patterns:", len(self.tile_patterns))
         print("Total Visits:", sum(self.tile_visit_count.values()))
-
-    def _update_reward_patterns(self, obs):
-        """Update pattern recognition for reward tile clusters."""
-        # Look for patterns in known reward tiles
-        for pos in self.known_reward_tiles:
-            x, y = pos
-            # Check 3x3 area around known reward tile
-            pattern = set()
-            for dx in [-1, 0, 1]:
-                for dy in [-1, 0, 1]:
-                    check_pos = (x + dx, y + dy)
-                    if check_pos in self.known_reward_tiles:
-                        pattern.add(check_pos)
-            
-            if len(pattern) >= 2:  # Found a pattern of at least 2 reward tiles
-                pattern_id = hash(frozenset(pattern))
-                self.tile_patterns[pattern_id] = pattern
-                self.pattern_confidence[pattern_id] = sum(self.tile_confidence.get(p, 0) for p in pattern) / len(pattern)
-                
-                # Increase confidence of nearby unknown tiles
-                for dx in [-2, -1, 0, 1, 2]:
-                    for dy in [-2, -1, 0, 1, 2]:
-                        nearby = (x + dx, y + dy)
-                        if nearby in self.unknown_tiles:
-                            self.tile_confidence[nearby] = self.tile_confidence.get(nearby, 50) + 5
 
     def update_possible_reward_tiles(self, obs):
         # ... unchanged ...
