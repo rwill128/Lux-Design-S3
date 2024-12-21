@@ -189,15 +189,6 @@ class BestAgentAttacker:
             ux, uy = obs["units"]["position"][self.team_id][uid]
             self.last_unit_positions.append((ux, uy))
 
-        # Print current categorization results
-        print("\n Time step:", obs["steps"])
-        print("Possible Tiles:", len(self.possible_reward_tiles))
-        print("Unknown Tiles:", len(self.unknown_tiles))
-        print("Not Reward Tiles:", len(self.not_reward_tiles))
-        print("Known Reward Tiles:", len(self.known_reward_tiles))
-        if len(self.known_reward_tiles) > 0:
-            print("Known Rewards:", self.known_reward_tiles)
-
     def update_possible_reward_tiles(self, obs):
         # ... unchanged ...
         relic_nodes_mask = obs["relic_nodes_mask"]
@@ -339,12 +330,6 @@ class BestAgentAttacker:
                     if tile_info["reward_tile"]:
                         all_reward_tiles.append((relic_pos, tile_pos))
 
-            print("Known relic positions across games:", self.known_relic_positions)
-            print("Known reward tiles at end of match:")
-            for relic_pos, tile_pos in all_reward_tiles:
-                print(f"Relic: {relic_pos}, Reward Tile: {tile_pos}")
-
-            self.end_of_match_printed = True
 
         # Before returning actions:
         a = actions[:, 0]  # action codes

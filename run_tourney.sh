@@ -11,6 +11,8 @@ mkdir -p "$OUTPUT_DIR"
 luxai-s3 agents/baseline_agent/main.py \
          submissions/relic_optimizer.py \
          submissions/best_agent_attacker_two.py \
+         submissions/best_agent_attacker_three.py \
+         submissions/best_agent_attacker_4.py \
          submissions/best_agent_attacker_no_nebula.py \
          submissions/relic_optimizer_refactored.py \
          submissions/relic_optimizer_with_energy_pathing.py \
