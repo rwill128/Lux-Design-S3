@@ -69,32 +69,6 @@ class BestAgentBetterShooter:
         assert isinstance(action, int), f"Action is not an integer! Found: {action} (type: {type(action)})"
         return action
 
-    def update_tile_results(self, current_points):
-        baseline = 0
-        for (x, y) in self.last_unit_positions:
-            for relic_pos, tiles_data in self.relic_tile_data.items():
-                if (x, y) in tiles_data and tiles_data[(x, y)]["reward_tile"]:
-                    baseline += 1
-
-        gain = current_points - self.last_team_points
-        extra = gain - baseline
-        if extra <= 0:
-            return
-
-        unknown_tiles_occupied_last_turn = []
-        for (x, y) in self.last_unit_positions:
-            for relic_pos, tiles_data in self.relic_tile_data.items():
-                if (x, y) in tiles_data:
-                    tile_info = tiles_data[(x, y)]
-                    if tile_info["tested"] == False and tile_info["reward_tile"] == False:
-                        unknown_tiles_occupied_last_turn.append((relic_pos, (x, y)))
-
-        if len(unknown_tiles_occupied_last_turn) > 0:
-            selected_candidates = unknown_tiles_occupied_last_turn[:extra]
-            for relic_pos, tile_pos in selected_candidates:
-                self.relic_tile_data[relic_pos][tile_pos]["reward_tile"] = True
-                self.relic_tile_data[relic_pos][tile_pos]["tested"] = True
-
     def select_tiles_for_relic(self, relic_pos):
         # ... unchanged ...
         reward_tiles = [t for t, d in self.relic_tile_data[relic_pos].items() if d["reward_tile"]]
@@ -298,9 +272,6 @@ class BestAgentBetterShooter:
 
         # 2) Deduce reward tiles based on occupancy and point gains
         self.deduce_reward_tiles(obs)
-
-        # 3) Update global tile results
-        self.update_tile_results(current_team_points)
 
         relic_nodes_mask = obs["relic_nodes_mask"]
         self.add_newly_discovered_relics(obs["relic_nodes"][relic_nodes_mask])
@@ -682,14 +653,8 @@ class BestAgentAttacker:
             # Apply decay to persistent confidence
             self.tile_confidence[tile] = confidence * self.CONFIDENCE_DECAY
             
-        # Initialize pattern tracking with persistence
-        self.relic_patterns = self._persistent_relic_patterns.copy()
         self.relic_tile_data = self._persistent_relic_data.copy()
-        
-        # Initialize basic 5x5 pattern possibilities if not already done
-        if not hasattr(self, 'possible_patterns'):
-            self.possible_patterns = self._generate_initial_patterns()
-            
+
         # Restore known relic positions with persistence
         self.known_relic_positions = self._persistent_known_relics.copy()
 
@@ -913,7 +878,6 @@ class BestAgentAttacker:
 
         # Update persistent storage
         self._persistent_tile_confidence.update(self.tile_confidence)
-        self._persistent_relic_patterns.update(self.relic_patterns)
         self._persistent_relic_data.update(self.relic_tile_data)
         self._persistent_known_relics = list(set(self.known_relic_positions))
 
@@ -930,119 +894,6 @@ class BestAgentAttacker:
         print("Known Reward Tiles:", len(self.known_reward_tiles))
         if len(self.known_reward_tiles) > 0:
             print("Known Rewards:", self.known_reward_tiles)
-
-    def _generate_initial_patterns(self):
-        """Generate initial set of possible 5x5 patterns around relics."""
-        patterns = []
-        # Start with some basic patterns - can be expanded based on game knowledge
-        # Cross pattern
-        cross = {(0,0), (0,1), (0,-1), (1,0), (-1,0)}
-        patterns.append(cross)
-        # X pattern
-        x_pattern = {(0,0), (1,1), (-1,-1), (1,-1), (-1,1)}
-        patterns.append(x_pattern)
-        # Box pattern
-        box = {(0,0), (0,1), (1,0), (1,1)}
-        patterns.append(box)
-        # L patterns
-        l_pattern = {(0,0), (0,1), (0,2), (1,0)}
-        patterns.append(l_pattern)
-        l_pattern_2 = {(0,0), (1,0), (2,0), (0,1)}
-        patterns.append(l_pattern_2)
-        return patterns
-
-    def update_possible_reward_tiles(self, obs):
-        """Update possible reward tiles based on relic positions and known patterns."""
-        relic_nodes_mask = obs["relic_nodes_mask"]
-        relic_nodes = obs["relic_nodes"][relic_nodes_mask]
-        
-        new_possible = set()
-        block_radius = 2
-        map_width = self.env_cfg["map_width"]
-        map_height = self.env_cfg["map_height"]
-        
-        # Update relic tracking
-        for (rx, ry) in relic_nodes:
-            relic_pos = (rx, ry)
-            # Initialize pattern tracking for new relics
-            if relic_pos not in self.relic_patterns:
-                # Convert possible_patterns to a set of frozensets for hashability
-                self.relic_patterns[relic_pos] = {frozenset(pattern) for pattern in self.possible_patterns}
-                self.relic_tile_data[relic_pos] = {}
-                
-            # Update possible tiles based on remaining valid patterns
-            valid_patterns = self.relic_patterns[relic_pos]
-            if not valid_patterns:  # If no patterns are valid, fall back to basic 5x5 grid
-                for bx in range(rx - block_radius, rx + block_radius + 1):
-                    for by in range(ry - block_radius, ry + block_radius + 1):
-                        if 0 <= bx < map_width and 0 <= by < map_height:
-                            new_possible.add((bx, by))
-                            # Track tile data
-                            if (bx, by) not in self.relic_tile_data[relic_pos]:
-                                self.relic_tile_data[relic_pos][(bx, by)] = {
-                                    "tested": False,
-                                    "is_reward": None
-                                }
-            else:
-                # Add tiles from remaining valid patterns (patterns are frozensets)
-                for pattern in valid_patterns:
-                    for (dx, dy) in pattern:  # pattern is already a frozenset
-                        bx, by = rx + dx, ry + dy
-                        if 0 <= bx < map_width and 0 <= by < map_height:
-                            new_possible.add((bx, by))
-                            # Track tile data
-                            if (bx, by) not in self.relic_tile_data[relic_pos]:
-                                self.relic_tile_data[relic_pos][(bx, by)] = {
-                                    "tested": False,
-                                    "is_reward": None
-                                }
-            
-            # Update tile testing status
-            for tile in self.known_reward_tiles:
-                if abs(tile[0] - rx) <= block_radius and abs(tile[1] - ry) <= block_radius:
-                    if tile in self.relic_tile_data[relic_pos]:
-                        self.relic_tile_data[relic_pos][tile]["tested"] = True
-                        self.relic_tile_data[relic_pos][tile]["is_reward"] = True
-                        
-            for tile in self.not_reward_tiles:
-                if abs(tile[0] - rx) <= block_radius and abs(tile[1] - ry) <= block_radius:
-                    if tile in self.relic_tile_data[relic_pos]:
-                        self.relic_tile_data[relic_pos][tile]["tested"] = True
-                        self.relic_tile_data[relic_pos][tile]["is_reward"] = False
-            
-            # Update valid patterns based on known tiles
-            self._update_valid_patterns(relic_pos)
-
-        self.possible_reward_tiles = new_possible
-        currently_unknown = self.possible_reward_tiles - self.known_reward_tiles - self.not_reward_tiles
-        self.unknown_tiles = currently_unknown
-        
-    def _update_valid_patterns(self, relic_pos):
-        """Update valid patterns for a relic based on known reward/non-reward tiles."""
-        rx, ry = relic_pos
-        invalid_patterns = set()
-        
-        for pattern in self.relic_patterns[relic_pos]:
-            # Check if pattern conflicts with known tiles
-            for tile, data in self.relic_tile_data[relic_pos].items():
-                if not data["tested"]:
-                    continue
-                    
-                tx, ty = tile
-                dx, dy = tx - rx, ty - ry
-                
-                # Pattern predicts reward but tile is not reward
-                if (dx, dy) in pattern and data["is_reward"] is False:
-                    invalid_patterns.add(pattern)
-                    break
-                    
-                # Pattern predicts no reward but tile is reward
-                if (dx, dy) not in pattern and data["is_reward"] is True:
-                    invalid_patterns.add(pattern)
-                    break
-        
-        # Remove invalid patterns
-        self.relic_patterns[relic_pos] -= invalid_patterns
 
     def dijkstra_pathfind(self, map_width, map_height, start, goal, obs):
         sensor_mask = obs["sensor_mask"]
