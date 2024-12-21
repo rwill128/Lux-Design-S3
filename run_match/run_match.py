@@ -6,7 +6,8 @@ from luxai_s3.wrappers import LuxAIS3GymEnv, RecordEpisode
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
-from submissions.best_agent_attacker import BestAgentAttacker
+from submissions.best_agent_attacker_different_deduce import BestAgentAttackerDifferentDeduce
+from submissions.best_agent_attacker_no_nebula_two import BestAgentAttackerNoNebulaTwo
 from submissions.best_agent_better_shooter import BestAgentBetterShooter
 
 def evaluate_agents(agent_1_cls, agent_2_cls, seed=45, games_to_play=3, replay_save_dir="replays"):
@@ -49,8 +50,8 @@ def evaluate_agents(agent_1_cls, agent_2_cls, seed=45, games_to_play=3, replay_s
 
 if __name__ == "__main__":
     # Run evaluation with the dummy Agent against itself
-    evaluate_agents(BestAgentBetterShooter, BestAgentAttacker, games_to_play=20, seed=2,
-                    replay_save_dir="replays/" + BestAgentBetterShooter.__name__ + "_" + BestAgentAttacker.__name__)
+    evaluate_agents(BestAgentBetterShooter, BestAgentAttackerDifferentDeduce, games_to_play=20, seed=2,
+                    replay_save_dir="replays/" + BestAgentBetterShooter.__name__ + "_" + BestAgentAttackerDifferentDeduce.__name__)
 
     # After running, you can check the "replays" directory for saved replay files.
     # You can set breakpoints anywhere in this file or inside the Agent class.
