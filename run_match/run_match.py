@@ -53,9 +53,11 @@ def evaluate_agents(agent_1_cls, agent_2_cls, seed=45, games_to_play=3, replay_s
 
 if __name__ == "__main__":
     # Run evaluation with the dummy Agent against itself
-    # Run three games with different seeds to capture diverse scenarios
+    # Import agents
     from submissions.best_agent_attacker import BestAgentAttacker
+    from run_match.agents import BestAgentBetterShooter
     
+    # Run three games with different seeds to capture diverse scenarios
     # Game 1: Baseline scenario
     evaluate_agents(BestAgentAttacker, BestAgentBetterShooter, seed=42, games_to_play=1,
                    replay_save_dir="replays/game_42")
