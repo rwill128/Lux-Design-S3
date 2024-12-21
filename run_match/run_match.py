@@ -1329,7 +1329,10 @@ class BestAgentAttacker:
                     for j in range(used_cell_count):
                         tx, ty = targets[j]
                         dist = abs(ux - tx) + abs(uy - ty)
-                        cost = dist
+                        confidence = self.tile_confidence.get((tx, ty), 0)
+                        cost = dist - int(confidence * self.CONFIDENCE_WEIGHT)
+                        if cost < 0:
+                            cost = 0
                         if (tx, ty) in self.known_reward_tiles:
                             cost += REWARD_BONUS
                             if cost < 0:
