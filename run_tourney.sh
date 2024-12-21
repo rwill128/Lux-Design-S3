@@ -10,6 +10,7 @@ mkdir -p "$OUTPUT_DIR"
 # Run the Lux AI tournament and save the replay
 luxai-s3 agents/baseline_agent/main.py \
          submissions/relic_optimizer.py \
+         submissions/best_agent_attacker_two.py \
          submissions/relic_optimizer_refactored.py \
          submissions/relic_optimizer_with_energy_pathing.py \
          submissions/relic_optimizer_with_reward_deducing_logic.py \
@@ -23,6 +24,6 @@ luxai-s3 agents/baseline_agent/main.py \
          agents/newest_agent/main.py \
          agents/best_agent/main.py \
          agents/best_agent_attacker/main.py \
-        --tournament --output "$OUTPUT_DIR/replay.json" --replay.no-compressed-obs --verbose 3 --tournament-cfg-max-episodes 5000 --tournament-cfg-concurrent 15
+        --tournament --output "$OUTPUT_DIR/replay.json" --tournament-cfg-max-episodes 5000 --tournament-cfg-concurrent 15
 
 echo "Replay saved to: $OUTPUT_DIR/replay.json"
