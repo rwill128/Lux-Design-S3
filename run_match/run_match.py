@@ -18,7 +18,7 @@ def evaluate_agents(agent_1_cls, agent_2_cls, seed=45, games_to_play=3, replay_s
     os.makedirs(replay_save_dir, exist_ok=True)
 
     # Create an environment wrapped to record episodes
-    gym_env = LuxAIS3GymEnv(numpy_output=True)
+    gym_env = LuxAIS3GymEnv(numpy_output=True, max_episode_length=100)  # Limit episode length
     gym_env.render_mode = "human"
     env = RecordEpisode(
         gym_env, save_on_close=True, save_on_reset=True, save_dir=replay_save_dir
@@ -57,16 +57,16 @@ if __name__ == "__main__":
     from submissions.best_agent_attacker import BestAgentAttacker
     
     # Game 1: Baseline scenario
-    evaluate_agents(BestAgentAttacker, BestAgentBetterShooter, games_to_play=1, seed=42,
-                   max_steps=100, replay_save_dir="replays/game_42")
+    evaluate_agents(BestAgentAttacker, BestAgentBetterShooter, seed=42, games_to_play=1,
+                   replay_save_dir="replays/game_42")
     
     # Game 2: Different seed for variety
-    evaluate_agents(BestAgentAttacker, BestAgentBetterShooter, games_to_play=1, seed=123,
-                   max_steps=100, replay_save_dir="replays/game_123")
+    evaluate_agents(BestAgentAttacker, BestAgentBetterShooter, seed=123, games_to_play=1,
+                   replay_save_dir="replays/game_123")
     
     # Game 3: Another seed for more scenarios
-    evaluate_agents(BestAgentAttacker, BestAgentBetterShooter, games_to_play=1, seed=456,
-                   max_steps=100, replay_save_dir="replays/game_456")
+    evaluate_agents(BestAgentAttacker, BestAgentBetterShooter, seed=456, games_to_play=1,
+                   replay_save_dir="replays/game_456")
 
     # After running, you can check the "replays" directory for saved replay files.
     # You can set breakpoints anywhere in this file or inside the Agent class.
