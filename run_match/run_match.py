@@ -48,7 +48,7 @@ def evaluate_agents(agent_1_cls, agent_2_cls, seed=45, games_to_play=3, max_step
     logger.info(f"Starting evaluation with seed {seed} and max_steps {max_steps}")
 
     # Create an environment wrapped to record episodes
-    gym_env = LuxAIS3GymEnv(numpy_output=True, max_episode_steps=max_steps)  # Initialize environment with max steps
+    gym_env = LuxAIS3GymEnv(numpy_output=True)  # Initialize environment
     gym_env.render_mode = "human"
     env = RecordEpisode(
         gym_env, save_on_close=True, save_on_reset=True, save_dir=replay_save_dir
@@ -73,7 +73,7 @@ def evaluate_agents(agent_1_cls, agent_2_cls, seed=45, games_to_play=3, max_step
 
             obs, reward, terminated, truncated, info = env.step(actions)
             dones = {k: terminated[k] or truncated[k] for k in terminated}
-            if dones["player_0"] or dones["player_1"]:
+            if dones["player_0"] or dones["player_1"] or step >= max_steps:
                 game_done = True
             step += 1
 
