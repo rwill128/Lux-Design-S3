@@ -741,6 +741,17 @@ class BestAgentAttacker:
 agent_dict = dict()  # store potentially multiple dictionaries as kaggle imports code directly
 agent_prev_obs = dict()
 
+def from_json(state):
+    if isinstance(state, list):
+        return np.array(state)
+    elif isinstance(state, dict):
+        out = {}
+        for k in state:
+            out[k] = from_json(state[k])
+        return out
+    else:
+        return state
+
 
 def agent_fn(observation, configurations):
     """
