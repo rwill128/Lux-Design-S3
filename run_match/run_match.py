@@ -665,6 +665,11 @@ class BestAgentAttacker:
         self.newly_unoccupied_unknown = set()
         self.newly_unoccupied_known = set()
 
+        # Confidence tracking for reward tiles
+        self.tile_confidence = {}  # Maps (x,y) -> confidence score
+        self.CONFIDENCE_THRESHOLD = 2  # Threshold for marking as reward tile
+        self.NEGATIVE_THRESHOLD = -2  # Threshold for marking as not reward
+        
         # New attribute to store known relic locations across games
         self.known_relic_positions = []  # list of (x, y) relic coordinates known from previous games
 
@@ -710,6 +715,10 @@ class BestAgentAttacker:
         return reward_tiles, untested_tiles
 
     def deduce_reward_tiles(self, obs):
+        """
+        Deduce which tiles are reward tiles based on unit movements and point gains.
+        Uses confidence tracking to improve accuracy of deductions.
+        """
         # Current points
         current_team_points = obs["team_points"][self.team_id]
         # If current_team_points is a scalar array, convert to python int
@@ -725,6 +734,9 @@ class BestAgentAttacker:
             x, y = unit_positions[uid]
             if (x, y) in self.unknown_tiles:
                 occupied_this_turn.add((x, y))
+                # Initialize confidence for newly seen tiles
+                if (x, y) not in self.tile_confidence:
+                    self.tile_confidence[(x, y)] = 0
 
         # Compute currently occupied known reward tiles
         currently_reward_occupied = set()
@@ -745,38 +757,86 @@ class BestAgentAttacker:
 
         # We have the same number of reward squares
         if gain == 0:
-            # No point gain means all occupied tiles are not reward tiles
-            self.not_reward_tiles.update(occupied_this_turn)
-            self.unknown_tiles -= self.not_reward_tiles
+            # No point gain means tiles are likely not reward tiles
+            for tile in occupied_this_turn:
+                self.tile_confidence[tile] = self.tile_confidence.get(tile, 0) - 1
+                if self.tile_confidence[tile] <= self.NEGATIVE_THRESHOLD:
+                    self.not_reward_tiles.add(tile)
+                    self.unknown_tiles.discard(tile)
+                    self.known_reward_tiles.discard(tile)
+                    
             if len(currently_reward_occupied) != 0:
-                # We think we're in a reward square but we gained nothing, we've made a mistake
-                self.known_reward_tiles = self.known_reward_tiles - currently_reward_occupied
-                self.not_reward_tiles.update(currently_reward_occupied)
-                # assert False
+                # We think we're in a reward square but we gained nothing
+                # Strong evidence these aren't reward tiles
+                for tile in currently_reward_occupied:
+                    self.tile_confidence[tile] = self.tile_confidence.get(tile, 0) - 2
+                    if self.tile_confidence[tile] <= self.NEGATIVE_THRESHOLD:
+                        self.known_reward_tiles.discard(tile)
+                        self.not_reward_tiles.add(tile)
+                        self.unknown_tiles.discard(tile)
 
         if gain_rate == 0:
             newly_occupied = occupied_this_turn - self.last_unknown_occupied
-
+            
+            # Initialize confidence for new tiles
+            for tile in newly_occupied:
+                if tile not in self.tile_confidence:
+                    self.tile_confidence[tile] = 0
+                    
             if len(newly_occupied) == 1 and len(newly_unoccupied) == 0:
-                self.not_reward_tiles.update(newly_occupied)
+                # Decrease confidence for newly occupied tile with no gain
+                tile = list(newly_occupied)[0]
+                self.tile_confidence[tile] = self.tile_confidence.get(tile, 0) - 1
+                if self.tile_confidence[tile] <= self.NEGATIVE_THRESHOLD:
+                    self.not_reward_tiles.add(tile)
+                    self.unknown_tiles.discard(tile)
+                    self.known_reward_tiles.discard(tile)
 
             if len(newly_unoccupied) == 1 and len(newly_occupied) == 0:
-                self.not_reward_tiles.update(newly_unoccupied)
+                # Decrease confidence for unoccupied tile with no gain change
+                tile = list(newly_unoccupied)[0]
+                self.tile_confidence[tile] = self.tile_confidence.get(tile, 0) - 1
+                if self.tile_confidence[tile] <= self.NEGATIVE_THRESHOLD:
+                    self.not_reward_tiles.add(tile)
+                    self.unknown_tiles.discard(tile)
+                    self.known_reward_tiles.discard(tile)
 
             if len(newly_occupied) == 1 and len(self.newly_unoccupied_known) == 1:
-                self.known_reward_tiles.update(newly_occupied)
-                self.unknown_tiles -= newly_occupied
+                # Maintain same points by moving to new reward tile
+                tile = list(newly_occupied)[0]
+                self.tile_confidence[tile] = self.tile_confidence.get(tile, 0) + 2
+                if self.tile_confidence[tile] >= self.CONFIDENCE_THRESHOLD:
+                    self.known_reward_tiles.add(tile)
+                    self.unknown_tiles.discard(tile)
+                    self.not_reward_tiles.discard(tile)
 
         if gain_rate > 0:
             # We entered a new reward square
             newly_occupied = occupied_this_turn - self.last_unknown_occupied
+            
+            # Initialize confidence for new tiles
+            for tile in newly_occupied:
+                if tile not in self.tile_confidence:
+                    self.tile_confidence[tile] = 0
+                    
             if len(newly_occupied) == 1 and len(self.newly_unoccupied_known) == 0:
-                # Exactly one new tile caused the gain
-                self.known_reward_tiles.update(newly_occupied)
-                self.unknown_tiles -= newly_occupied
+                # Exactly one new tile caused the gain - strong evidence it's a reward tile
+                tile = list(newly_occupied)[0]
+                self.tile_confidence[tile] = self.tile_confidence.get(tile, 0) + 2
+                if self.tile_confidence[tile] >= self.CONFIDENCE_THRESHOLD:
+                    self.known_reward_tiles.add(tile)
+                    self.unknown_tiles.discard(tile)
+                    self.not_reward_tiles.discard(tile)
             elif len(newly_occupied) > 1:
-                # More than one new unknown tile is occupied, can't deduce which is reward
-                pass
+                # More than one new unknown tile is occupied
+                # Distribute confidence among newly occupied tiles
+                confidence_change = gain_rate / len(newly_occupied)
+                for tile in newly_occupied:
+                    self.tile_confidence[tile] = self.tile_confidence.get(tile, 0) + confidence_change
+                    if self.tile_confidence[tile] >= self.CONFIDENCE_THRESHOLD:
+                        self.known_reward_tiles.add(tile)
+                        self.unknown_tiles.discard(tile)
+                        self.not_reward_tiles.discard(tile)
             else:
                 # gain_rate > 0 but no new tiles were occupied?
                 # This should not happen if our logic relies on new occupancy for gain
@@ -787,22 +847,40 @@ class BestAgentAttacker:
         if gain_rate < 0:
             # We had fewer points gained this turn than last turn
             # This suggests we lost a reward tile occupant
-            # Tiles that were occupied last turn but not this turn:
             newly_occupied = occupied_this_turn - self.last_unknown_occupied
+            
+            # Initialize confidence for new tiles
+            for tile in newly_occupied:
+                if tile not in self.tile_confidence:
+                    self.tile_confidence[tile] = 0
+                    
             if len(newly_occupied) == 1 and len(self.newly_unoccupied_known) == 0:
-                # This isn't working correctly
-                # For now it's degrading bot performance in subsequent rounds because we're doing a
-                # pretty good job of finding reward tiles the first round and then marking them as non-reward incorrectly
-                self.not_reward_tiles.update(newly_occupied)
+                # Instead of immediately marking as not_reward, decrease confidence
+                for tile in newly_occupied:
+                    self.tile_confidence[tile] = self.tile_confidence.get(tile, 0) - 1
+                    if self.tile_confidence[tile] <= self.NEGATIVE_THRESHOLD:
+                        self.not_reward_tiles.add(tile)
+                        self.known_reward_tiles.discard(tile)
+                        self.unknown_tiles.discard(tile)
 
             if len(newly_unoccupied) == 1:
                 # Exactly one tile was vacated and gain rate dropped
-                # That tile must have been a reward tile that we lost
-                self.known_reward_tiles.update(newly_unoccupied)
-                self.unknown_tiles -= newly_unoccupied
+                # Strong evidence this was a reward tile
+                tile = list(newly_unoccupied)[0]
+                self.tile_confidence[tile] = self.tile_confidence.get(tile, 0) + 2
+                if self.tile_confidence[tile] >= self.CONFIDENCE_THRESHOLD:
+                    self.known_reward_tiles.add(tile)
+                    self.unknown_tiles.discard(tile)
+                    self.not_reward_tiles.discard(tile)
             elif len(newly_unoccupied) > 1:
-                # More than one tile vacated - can't deduce which one caused the drop
-                pass
+                # More than one tile vacated - distribute confidence changes
+                confidence_change = abs(gain_rate) / len(newly_unoccupied)
+                for tile in newly_unoccupied:
+                    self.tile_confidence[tile] = self.tile_confidence.get(tile, 0) + confidence_change
+                    if self.tile_confidence[tile] >= self.CONFIDENCE_THRESHOLD:
+                        self.known_reward_tiles.add(tile)
+                        self.unknown_tiles.discard(tile)
+                        self.not_reward_tiles.discard(tile)
             elif len(newly_unoccupied) == 0:
                 pass
                 # assert False, "We lost points but we don't have any newly unoccupied tiles?"
