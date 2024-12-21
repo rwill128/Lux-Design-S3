@@ -9,8 +9,9 @@ from luxai_s3.wrappers import LuxAIS3GymEnv, RecordEpisode
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
+from submissions.attacker import BestAgentAttacker
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from submissions.best_agent_attacker import BestAgentAttacker
 from submissions.best_agent_better_shooter import BestAgentBetterShooter
 
 def setup_logging(log_file, log_level):
