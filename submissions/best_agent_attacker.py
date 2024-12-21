@@ -50,6 +50,24 @@ class BestAgentAttacker:
 
         # New attribute to store known relic locations across games
         self.known_relic_positions = []  # list of (x, y) relic coordinates known from previous games
+        
+        # Initialize confidence tracking with persistence
+        self.CONFIDENCE_DECAY = 0.95  # Confidence decay factor
+        
+        # Initialize class-level storage if not exists
+        if not hasattr(BestAgentAttacker, '_global_tile_confidence'):
+            BestAgentAttacker._global_tile_confidence = {}
+        if not hasattr(BestAgentAttacker, '_global_relic_patterns'):
+            BestAgentAttacker._global_relic_patterns = {}
+            
+        # Load persisted confidence values with decay
+        self.tile_confidence = {
+            k: v * self.CONFIDENCE_DECAY 
+            for k, v in BestAgentAttacker._global_tile_confidence.items()
+        }
+        
+        # Load persisted pattern data
+        self.relic_patterns = BestAgentAttacker._global_relic_patterns.copy()
 
     def simple_heuristic_move(self, from_pos, to_pos):
         # ... unchanged ...
@@ -126,8 +144,6 @@ class BestAgentAttacker:
             "last_unit_positions": self.last_unit_positions
         }
         obs_serializable = convert_np_arrays(obs)
-        logger = logging.getLogger('deduce_reward_tiles')
-        logger.debug("DEBUG_LOG_BEFORE %s", json.dumps({'obs': obs_serializable, 'agent_state': debug_state_before}, cls=NumpyEncoder))
 
         # Current points
         current_team_points = obs["team_points"][self.team_id]
@@ -144,6 +160,17 @@ class BestAgentAttacker:
             x, y = unit_positions[uid]
             if (x, y) in self.unknown_tiles:
                 occupied_this_turn.add((x, y))
+                # Initialize confidence for newly visited tiles
+                if (x, y) not in self.tile_confidence:
+                    self.tile_confidence[(x, y)] = 0.0
+                    BestAgentAttacker._global_tile_confidence[(x, y)] = 0.0
+        
+        # Update confidence based on point gains
+        if gain > 0 and occupied_this_turn:
+            confidence_per_tile = gain / len(occupied_this_turn)
+            for pos in occupied_this_turn:
+                self.tile_confidence[pos] += confidence_per_tile
+                BestAgentAttacker._global_tile_confidence[pos] = self.tile_confidence[pos]
 
         # Compute currently occupied known reward tiles
         currently_reward_occupied = set()
@@ -248,8 +275,6 @@ class BestAgentAttacker:
         }
         # Convert obs to serializable format for debug logging
         obs_serializable = convert_np_arrays(obs)
-        logger = logging.getLogger('deduce_reward_tiles')
-        logger.debug("DEBUG_LOG_AFTER %s", json.dumps({'obs': obs_serializable, 'agent_state': debug_state_after}, cls=NumpyEncoder))
         
         for uid in np.where(obs["units_mask"][self.team_id])[0]:
             ux, uy = obs["units"]["position"][self.team_id][uid]
