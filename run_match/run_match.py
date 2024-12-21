@@ -1,4 +1,6 @@
 import os
+from collections import defaultdict
+
 from luxai_s3.wrappers import LuxAIS3GymEnv, RecordEpisode
 
 import numpy as np
@@ -607,18 +609,6 @@ class BestAgentBetterShooter:
 
 
 class BestAgentAttacker:
-    # Class-level storage for persistent knowledge across matches
-    _persistent_tile_confidence = {}  # Maps (x,y) -> confidence score
-    _persistent_relic_patterns = {}  # Maps (rx,ry) -> {possible_patterns}
-    _persistent_relic_data = {}  # Maps (rx,ry) -> {(x,y): {"tested": bool, "is_reward": bool}}
-    _persistent_known_relics = []  # List of (x, y) relic coordinates
-    
-    # Constants
-    CONFIDENCE_THRESHOLD = 2  # Threshold for marking as reward tile
-    NEGATIVE_THRESHOLD = -2  # Threshold for marking as not reward
-    CONFIDENCE_DECAY = 0.8  # Decay factor for confidence between matches
-    CONFIDENCE_WEIGHT = 3  # Weight factor for confidence in pathfinding costs
-    
     def __init__(self, player: str, env_cfg) -> None:
         self.player = player
         self.opp_player = "player_1" if self.player == "player_0" else "player_0"
@@ -631,6 +621,7 @@ class BestAgentAttacker:
         self.relic_allocation = 20
         self.expected_baseline_gain = 0
 
+        self.relic_tile_data = {}
         self.end_of_match_printed = False
         self.last_unit_positions = []  # store positions of units from previous turn
 
@@ -644,16 +635,8 @@ class BestAgentAttacker:
         self.newly_unoccupied_unknown = set()
         self.newly_unoccupied_known = set()
 
-        # Initialize confidence tracking with persistence
-        self.tile_confidence = {}
-        for tile, confidence in self._persistent_tile_confidence.items():
-            # Apply decay to persistent confidence
-            self.tile_confidence[tile] = confidence * self.CONFIDENCE_DECAY
-            
-        self.relic_tile_data = self._persistent_relic_data.copy()
-
-        # Restore known relic positions with persistence
-        self.known_relic_positions = self._persistent_known_relics.copy()
+        # New attribute to store known relic locations across games
+        self.known_relic_positions = []  # list of (x, y) relic coordinates known from previous games
 
     def simple_heuristic_move(self, from_pos, to_pos):
         # ... unchanged ...
@@ -697,12 +680,9 @@ class BestAgentAttacker:
         return reward_tiles, untested_tiles
 
     def deduce_reward_tiles(self, obs):
-        """
-        Deduce which tiles are reward tiles based on unit movements and point gains.
-        Uses confidence tracking to improve accuracy of deductions.
-        """
         # Current points
         current_team_points = obs["team_points"][self.team_id]
+        # If current_team_points is a scalar array, convert to python int
         if hasattr(current_team_points, 'item'):
             current_team_points = current_team_points.item()
         gain = current_team_points - self.last_team_points
@@ -715,8 +695,6 @@ class BestAgentAttacker:
             x, y = unit_positions[uid]
             if (x, y) in self.unknown_tiles:
                 occupied_this_turn.add((x, y))
-                if (x, y) not in self.tile_confidence:
-                    self.tile_confidence[(x, y)] = 0
 
         # Compute currently occupied known reward tiles
         currently_reward_occupied = set()
@@ -732,52 +710,78 @@ class BestAgentAttacker:
         newly_unoccupied = self.newly_unoccupied_unknown.union(self.newly_unoccupied_known)
 
         # Determine if gain rate went down compared to last turn's gain
-        last_gain = getattr(self, 'last_gain', 0)
+        last_gain = getattr(self, 'last_gain', 0)  # if not set, assume 0 from previous turn
         gain_rate = gain - last_gain
 
-        # Heuristic: Reduce confidence for newly occupied and vacated tiles if gain rate is unchanged
+        # We have the same number of reward squares
+        if gain == 0:
+            # No point gain means all occupied tiles are not reward tiles
+            self.not_reward_tiles.update(occupied_this_turn)
+            self.unknown_tiles -= self.not_reward_tiles
+            if len(currently_reward_occupied) != 0:
+                # We think we're in a reward square but we gained nothing, we've made a mistake
+                self.known_reward_tiles = self.known_reward_tiles - currently_reward_occupied
+                self.not_reward_tiles.update(currently_reward_occupied)
+                # assert False
+
         if gain_rate == 0:
             newly_occupied = occupied_this_turn - self.last_unknown_occupied
-            for tile in newly_occupied:
-                self.tile_confidence[tile] -= 1  # Confidence loss for newly occupied tiles
-                if self.tile_confidence[tile] <= self.NEGATIVE_THRESHOLD:
-                    self.not_reward_tiles.add(tile)
-                    self.unknown_tiles.discard(tile)
-                    self.known_reward_tiles.discard(tile)
 
-            for tile in newly_unoccupied:
-                self.tile_confidence[tile] -= 1  # Confidence loss for newly vacated tiles
-                if self.tile_confidence[tile] <= self.NEGATIVE_THRESHOLD:
-                    self.not_reward_tiles.add(tile)
-                    self.unknown_tiles.discard(tile)
-                    self.known_reward_tiles.discard(tile)
+            if len(newly_occupied) == 1 and len(newly_unoccupied) == 0:
+                self.not_reward_tiles.update(newly_occupied)
+
+            if len(newly_unoccupied) == 1 and len(newly_occupied) == 0:
+                self.not_reward_tiles.update(newly_unoccupied)
+
+            if len(newly_occupied) == 1 and len(self.newly_unoccupied_known) == 1:
+                self.known_reward_tiles.update(newly_occupied)
+                self.unknown_tiles -= newly_occupied
 
         if gain_rate > 0:
+            # We entered a new reward square
             newly_occupied = occupied_this_turn - self.last_unknown_occupied
-            for tile in newly_occupied:
-                self.tile_confidence[tile] += 2
-                if self.tile_confidence[tile] >= self.CONFIDENCE_THRESHOLD:
-                    self.known_reward_tiles.add(tile)
-                    self.unknown_tiles.discard(tile)
-                    self.not_reward_tiles.discard(tile)
+            if len(newly_occupied) == 1 and len(self.newly_unoccupied_known) == 0:
+                # Exactly one new tile caused the gain
+                self.known_reward_tiles.update(newly_occupied)
+                self.unknown_tiles -= newly_occupied
+            elif len(newly_occupied) > 1:
+                # More than one new unknown tile is occupied, can't deduce which is reward
+                pass
+            else:
+                # gain_rate > 0 but no new tiles were occupied?
+                # This should not happen if our logic relies on new occupancy for gain
+                pass
+                # assert False, "Points went up but no new unknown tile was occupied."
 
+        # We have fewer reward squares
         if gain_rate < 0:
-            for tile in newly_unoccupied:
-                self.tile_confidence[tile] += 2
-                if self.tile_confidence[tile] >= self.CONFIDENCE_THRESHOLD:
-                    self.known_reward_tiles.add(tile)
-                    self.unknown_tiles.discard(tile)
-                    self.not_reward_tiles.discard(tile)
+            # We had fewer points gained this turn than last turn
+            # This suggests we lost a reward tile occupant
+            # Tiles that were occupied last turn but not this turn:
+            newly_occupied = occupied_this_turn - self.last_unknown_occupied
+            if len(newly_occupied) == 1 and len(self.newly_unoccupied_known) == 0:
+                # This isn't working correctly
+                # For now it's degrading bot performance in subsequent rounds because we're doing a
+                # pretty good job of finding reward tiles the first round and then marking them as non-reward incorrectly
+                self.not_reward_tiles.update(newly_occupied)
+
+            if len(newly_unoccupied) == 1:
+                # Exactly one tile was vacated and gain rate dropped
+                # That tile must have been a reward tile that we lost
+                self.known_reward_tiles.update(newly_unoccupied)
+                self.unknown_tiles -= newly_unoccupied
+            elif len(newly_unoccupied) > 1:
+                # More than one tile vacated - can't deduce which one caused the drop
+                pass
+            elif len(newly_unoccupied) == 0:
+                pass
+                # assert False, "We lost points but we don't have any newly unoccupied tiles?"
 
         # Update tracking
         self.last_reward_occupied = currently_reward_occupied
         self.last_unknown_occupied = occupied_this_turn
         self.last_team_points = current_team_points
-        self.last_gain = gain
-
-        # Update persistent storage
-        self._persistent_tile_confidence.update(self.tile_confidence)
-        self._persistent_relic_data.update(self.relic_tile_data)
+        self.last_gain = gain  # Store current gain for next turn
 
         self.last_unit_positions = []
         for uid in np.where(obs["units_mask"][self.team_id])[0]:
@@ -792,6 +796,25 @@ class BestAgentAttacker:
         print("Known Reward Tiles:", len(self.known_reward_tiles))
         if len(self.known_reward_tiles) > 0:
             print("Known Rewards:", self.known_reward_tiles)
+
+    def update_possible_reward_tiles(self, obs):
+        # ... unchanged ...
+        relic_nodes_mask = obs["relic_nodes_mask"]
+        relic_nodes = obs["relic_nodes"][relic_nodes_mask]
+
+        new_possible = set()
+        block_radius = 2
+        map_width = self.env_cfg["map_width"]
+        map_height = self.env_cfg["map_height"]
+        for (rx, ry) in relic_nodes:
+            for bx in range(rx - block_radius, rx + block_radius + 1):
+                for by in range(ry - block_radius, ry + block_radius + 1):
+                    if 0 <= bx < map_width and 0 <= by < map_height:
+                        new_possible.add((bx, by))
+
+        self.possible_reward_tiles = new_possible
+        currently_unknown = self.possible_reward_tiles - self.known_reward_tiles - self.not_reward_tiles
+        self.unknown_tiles = currently_unknown
 
     def dijkstra_pathfind(self, map_width, map_height, start, goal, obs):
         sensor_mask = obs["sensor_mask"]
@@ -851,6 +874,9 @@ class BestAgentAttacker:
         unit_positions = np.array(obs["units"]["position"][self.team_id])
         opp_positions = np.array(obs["units"]["position"][self.opp_team_id])
 
+        # 1) Update possible reward tiles
+        self.update_possible_reward_tiles(obs)
+
         # 2) Deduce reward tiles based on occupancy and point gains
         self.deduce_reward_tiles(obs)
 
@@ -897,6 +923,22 @@ class BestAgentAttacker:
             # This is where I'd like to attack instead.
             self.send_to_attack_if_not_going_to_relic(NON_REWARD_PENALTY, REWARD_BONUS, actions, map_height, map_width,
                                                       obs, remaining_units, unit_positions)
+
+        # If the match ended, print known relic positions and reward tiles
+        # Do not clear self.known_relic_positions here, so it's usable next game
+        if obs["steps"] == 500 and not self.end_of_match_printed:
+            all_reward_tiles = []
+            for relic_pos, tiles_data in self.relic_tile_data.items():
+                for tile_pos, tile_info in tiles_data.items():
+                    if tile_info["reward_tile"]:
+                        all_reward_tiles.append((relic_pos, tile_pos))
+
+            print("Known relic positions across games:", self.known_relic_positions)
+            print("Known reward tiles at end of match:")
+            for relic_pos, tile_pos in all_reward_tiles:
+                print(f"Relic: {relic_pos}, Reward Tile: {tile_pos}")
+
+            self.end_of_match_printed = True
 
         # Before returning actions:
         a = actions[:, 0]  # action codes
@@ -1006,10 +1048,7 @@ class BestAgentAttacker:
             for j in range(used_cell_count):
                 tx, ty = targets[j]
                 dist = abs(ux - tx) + abs(uy - ty)
-                confidence = self.tile_confidence.get((tx, ty), 0)
-                cost = dist - int(confidence * self.CONFIDENCE_WEIGHT)
-                if cost < 0:
-                    cost = 0
+                cost = dist
                 # If desired, adjust cost based on known tiles:
                 if (tx, ty) in self.known_reward_tiles:
                     cost += REWARD_BONUS
@@ -1079,10 +1118,7 @@ class BestAgentAttacker:
                     for j in range(used_cell_count):
                         tx, ty = targets[j]
                         dist = abs(ux - tx) + abs(uy - ty)
-                        confidence = self.tile_confidence.get((tx, ty), 0)
-                        cost = dist - int(confidence * self.CONFIDENCE_WEIGHT)
-                        if cost < 0:
-                            cost = 0
+                        cost = dist
                         if (tx, ty) in self.known_reward_tiles:
                             cost += REWARD_BONUS
                             if cost < 0:
