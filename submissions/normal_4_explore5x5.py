@@ -5,17 +5,21 @@ import numpy as np
 from scipy.optimize import linear_sum_assignment
 
 
-class BestAgentAttacker4:
+class BestAgentAttackerExplore5x5:
     def __init__(self, player: str, env_cfg) -> None:
         self.player = player
         self.opp_player = "player_1" if self.player == "player_0" else "player_0"
         self.team_id = 0 if self.player == "player_0" else 1
+        # Track visited tiles within each relic's 5x5 area
+        self.relic_area_visited = {}
+        # Constants for exploration targeting
+        self.UNVISITED_RELIC_TILE_BONUS = -50  # Negative cost = higher priority
         self.opp_team_id = 1 if self.team_id == 0 else 0
         np.random.seed(0)
         self.env_cfg = env_cfg
 
         self.last_team_points = 0
-        self.relic_allocation = 20
+        self.relic_allocation = 50
         self.expected_baseline_gain = 0
 
         self.relic_tile_data = {}
@@ -313,6 +317,16 @@ class BestAgentAttacker4:
         relic_nodes_mask = obs["relic_nodes_mask"]
         self.add_newly_discovered_relics(obs["relic_nodes"][relic_nodes_mask])
 
+        # Update visited tiles in relic areas
+        unit_mask = obs["units_mask"][self.team_id]
+        for uid in np.where(unit_mask)[0]:
+            ux, uy = unit_positions[uid]
+            # Check if unit is in any relic's 5x5 area
+            for (rx, ry) in self.relic_tile_data.keys():
+                if abs(ux - rx) <= 2 and abs(uy - ry) <= 2:
+                    # Add current position to visited tiles for this relic
+                    self.relic_area_visited[(rx, ry)].add((ux, uy))
+
         actions = np.zeros((self.env_cfg["max_units"], 3), dtype=int)
         available_unit_ids = np.where(obs["units_mask"][self.team_id])[0]
 
@@ -351,8 +365,8 @@ class BestAgentAttacker4:
                                                        obs, remaining_units, unit_positions)
         else:
             # This is where I'd like to attack instead.
-            self.send_to_attack_if_not_going_to_relic(NON_REWARD_PENALTY, REWARD_BONUS, actions, map_height, map_width,
-                                                      obs, remaining_units, unit_positions)
+            self.send_to_explore_if_not_going_to_relic(NON_REWARD_PENALTY, REWARD_BONUS, actions, map_height, map_width,
+                                                       obs, remaining_units, unit_positions)
 
         # If the match ended, print known relic positions and reward tiles
         # Do not clear self.known_relic_positions here, so it's usable next game
@@ -548,6 +562,11 @@ class BestAgentAttacker4:
                                 cost = 0
                         if (tx, ty) in self.not_reward_tiles:
                             cost += NON_REWARD_PENALTY
+                        # Prioritize unvisited tiles in relic areas
+                        if self.is_unvisited_relic_tile(tx, ty):
+                            cost += self.UNVISITED_RELIC_TILE_BONUS
+                            if cost < 0:
+                                cost = 0
                         cost_matrix[i, j] = cost
 
                 row_ind, col_ind = linear_sum_assignment(cost_matrix)
@@ -761,11 +780,22 @@ class BestAgentAttacker4:
                         if found_target:
                             break
 
+    def is_unvisited_relic_tile(self, x, y):
+        """Check if a tile is within any relic's 5x5 area and hasn't been visited."""
+        for (rx, ry), visited in self.relic_area_visited.items():
+            # Check if (x,y) is within this relic's 5x5 area
+            if abs(x - rx) <= 2 and abs(y - ry) <= 2:
+                if (x, y) not in visited:
+                    return True
+        return False
+
     def add_newly_discovered_relics(self, relic_nodes_positions):
         # Add newly discovered relics to known_relic_positions
         for (rx, ry) in relic_nodes_positions:
             if (rx, ry) not in self.relic_tile_data:
                 self.relic_tile_data[(rx, ry)] = {}
+                # Initialize visited tiles tracking for this relic's 5x5 area
+                self.relic_area_visited[(rx, ry)] = set()
                 for bx in range(rx - 2, rx + 3):
                     for by in range(ry - 2, ry + 3):
                         if 0 <= bx < self.env_cfg["map_width"] and 0 <= by < self.env_cfg["map_height"]:
@@ -801,7 +831,7 @@ def agent_fn(observation, configurations):
     player = observation.player
     remainingOverageTime = observation.remainingOverageTime
     if step == 0:
-        agent_dict[player] = BestAgentAttacker4(player, configurations["env_cfg"])
+        agent_dict[player] = BestAgentAttackerExplore5x5(player, configurations["env_cfg"])
     agent = agent_dict[player]
     actions = agent.act(step, from_json(obs), remainingOverageTime)
     return dict(action=actions.tolist())

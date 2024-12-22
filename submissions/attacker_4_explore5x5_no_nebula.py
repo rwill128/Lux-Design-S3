@@ -625,7 +625,6 @@ class BestAgentAttackerExplore5x5:
         # relic_targets = [t for t in relic_targets if t not in occupied_positions]
         # Prioritization constants
         REWARD_BONUS = -100
-        POTENTIAL_RELIC_POINTS = -10
         NON_REWARD_PENALTY = 0
         if self.relic_allocation > 0 and len(relic_targets) > 0:
             relic_units_count = min(self.relic_allocation, len(remaining_units), len(relic_targets))

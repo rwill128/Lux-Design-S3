@@ -5,7 +5,7 @@ import numpy as np
 from scipy.optimize import linear_sum_assignment
 
 
-class BestAgentAttacker4:
+class BestAgentAttackerMoreCollisions:
     def __init__(self, player: str, env_cfg) -> None:
         self.player = player
         self.opp_player = "player_1" if self.player == "player_0" else "player_0"
@@ -801,7 +801,7 @@ def agent_fn(observation, configurations):
     player = observation.player
     remainingOverageTime = observation.remainingOverageTime
     if step == 0:
-        agent_dict[player] = BestAgentAttacker4(player, configurations["env_cfg"])
+        agent_dict[player] = BestAgentAttackerMoreCollisions(player, configurations["env_cfg"])
     agent = agent_dict[player]
     actions = agent.act(step, from_json(obs), remainingOverageTime)
     return dict(action=actions.tolist())
