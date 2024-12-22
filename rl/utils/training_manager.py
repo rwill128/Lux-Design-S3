@@ -159,6 +159,14 @@ class SeriesTrainingManager:
             # Take step in environment
             next_obs, reward, done, truncated, info = self.env.step(action)
             
+            # Debug environment step outputs
+            print(f"[training_manager] reward type: {type(reward)}")
+            print(f"[training_manager] reward value: {reward}")
+            print(f"[training_manager] done type: {type(done)}")
+            print(f"[training_manager] done value: {done}")
+            print(f"[training_manager] truncated type: {type(truncated)}")
+            print(f"[training_manager] truncated value: {truncated}")
+            
             # Extract scalar values for training
             # Handle reward dictionary
             if isinstance(reward, dict):

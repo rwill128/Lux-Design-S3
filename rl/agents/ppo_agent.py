@@ -318,13 +318,35 @@ class LuxPPOAgent:
                 for k, v in next_obs_numpy.items()
             })
             
+            # Debug shapes before GAE
+            print(f"[train_step] rewards_tensor shape: {rewards_tensor.shape}")
+            print(f"[train_step] values shape before GAE: {values.shape}")
+            print(f"[train_step] next_values shape before GAE: {next_values.shape}")
+            print(f"[train_step] dones_tensor shape before GAE: {dones_tensor.shape}")
+            
+            # Ensure tensors have proper batch dimension
+            if len(rewards_tensor.shape) == 1:
+                rewards_tensor = rewards_tensor.unsqueeze(1)
+            if len(values.shape) == 1:
+                values = values.unsqueeze(1)
+            if len(next_values.shape) == 1:
+                next_values = next_values.unsqueeze(1)
+            if len(dones_tensor.shape) == 1:
+                dones_tensor = dones_tensor.unsqueeze(1)
+            
             advantages = self._compute_gae(
                 rewards_tensor,
                 values,
                 next_values,
                 dones_tensor
             )
+            
+            # Debug shapes after GAE
+            print(f"[train_step] advantages shape: {advantages.shape}")
+            print(f"[train_step] values shape after GAE: {values.shape}")
+            
             returns = advantages + values
+            print(f"[train_step] returns shape: {returns.shape}")
             
         # PPO training loop
         for _ in range(self.n_epochs):
@@ -386,11 +408,27 @@ class LuxPPOAgent:
         Returns:
             torch.Tensor: Advantages
         """
+        # Debug input shapes
+        print(f"[compute_gae] rewards shape: {rewards.shape}")
+        print(f"[compute_gae] values shape: {values.shape}")
+        print(f"[compute_gae] next_values shape: {next_values.shape}")
+        print(f"[compute_gae] dones shape: {dones.shape}")
+        
+        # Handle empty tensors
+        if rewards.shape[0] == 0:
+            print("[compute_gae] Warning: Empty tensors received")
+            return torch.zeros((1, 1), device=self.device)
+            
+        # Ensure all tensors have same batch size
+        batch_size = rewards.shape[0]
+        if values.shape[0] != batch_size or next_values.shape[0] != batch_size or dones.shape[0] != batch_size:
+            raise ValueError(f"Tensor batch sizes don't match: rewards={rewards.shape}, values={values.shape}, next_values={next_values.shape}, dones={dones.shape}")
+            
         advantages = torch.zeros_like(rewards)
         last_gae = 0
         
-        for t in reversed(range(len(rewards))):
-            if t == len(rewards) - 1:
+        for t in reversed(range(batch_size)):
+            if t == batch_size - 1:
                 next_value = next_values[t]
             else:
                 next_value = values[t + 1]
@@ -398,4 +436,5 @@ class LuxPPOAgent:
             delta = rewards[t] + self.gamma * next_value * (1 - dones[t]) - values[t]
             advantages[t] = last_gae = delta + self.gamma * self.gae_lambda * (1 - dones[t]) * last_gae
             
+        print(f"[compute_gae] advantages shape: {advantages.shape}")
         return advantages
