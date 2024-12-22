@@ -168,9 +168,28 @@ class LuxRLWrapper(gym.Wrapper):
             if isinstance(player_obs, EnvObs):
                 # Extract features from EnvObs
                 map_features = np.array(player_obs.map_features.tile_type, dtype=np.float32)
-                unit_positions = player_obs.units.position.astype(np.float32)
-                unit_energy = player_obs.units.energy.astype(np.float32)
-                units_mask = player_obs.units_mask.astype(np.float32)
+                
+                # Handle unit positions - extract player 0's units and reshape
+                raw_positions = player_obs.units.position
+                if len(raw_positions.shape) == 3:  # Shape is (2, 16, 2)
+                    unit_positions = raw_positions[0].astype(np.float32)  # Take player 0's units
+                else:
+                    unit_positions = raw_positions.astype(np.float32)
+                    
+                # Handle unit energy similarly
+                raw_energy = player_obs.units.energy
+                if len(raw_energy.shape) == 2:  # Shape might be (2, 16)
+                    unit_energy = raw_energy[0].reshape(-1, 1).astype(np.float32)  # Take player 0's units
+                else:
+                    unit_energy = raw_energy.reshape(-1, 1).astype(np.float32)
+                    
+                # Handle units mask
+                raw_mask = player_obs.units_mask
+                if len(raw_mask.shape) == 2:  # Shape might be (2, 16)
+                    units_mask = raw_mask[0].astype(np.float32)  # Take player 0's mask
+                else:
+                    units_mask = raw_mask.astype(np.float32)
+                    
                 team_points = player_obs.team_points.astype(np.float32)
                 match_steps = float(player_obs.match_steps)
             else:
