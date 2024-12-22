@@ -99,11 +99,12 @@ class LuxRLWrapper(gym.Wrapper):
             options: Additional options for reset
             
         Returns:
-            tuple: (observation, info)
+            dict: Processed observation
         """
         obs, info = super().reset(seed=seed, options=options)
         self.current_step = 0
-        return self._process_observation(obs), info
+        # Only return the processed observation, not the info dict
+        return self._process_observation(obs)
         
     def step(self, action):
         """Take a step in the environment using the given action.
