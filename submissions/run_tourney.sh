@@ -13,6 +13,8 @@ luxai-s3 attacker_two.py \
          attacker_three.py \
          attacker_4.py \
          attacker_4_no_nebula.py \
+         attacker_4_explore5x5.py \
+         attacker_4_explore5x5_no_nebula.py \
          attacker_five.py \
          attacker_no_nebula.py \
          attacker_no_nebula_two.py \
