@@ -208,10 +208,24 @@ class LuxRLWrapper(gym.Wrapper):
             action: Normalized actions from policy
             
         Returns:
-            dict: Actions in environment format
+            dict: Actions in environment format with player keys
         """
-        # TODO: Implement action processing
-        return {}
+        # Convert action to numpy array if it's a dictionary
+        if isinstance(action, dict):
+            action = action.get('unit_actions', np.zeros((self.max_units, 4), dtype=np.float32))
+        
+        # Ensure action is a numpy array
+        action = np.array(action, dtype=np.float32)
+        
+        # Create empty action array for opponent
+        opponent_action = np.zeros_like(action)
+        
+        # Format actions with player keys
+        env_action = {
+            'player_0': action,
+            'player_1': opponent_action
+        }
+        return env_action
         
     def _shape_reward(self, reward, info):
         """Shape the reward to encourage desired behavior.
