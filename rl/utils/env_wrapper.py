@@ -136,6 +136,15 @@ class LuxRLWrapper(gym.Wrapper):
         Returns:
             dict: Processed observation
         """
+        # Debug: Print observation structure
+        if isinstance(obs, dict):
+            print("Observation keys:", obs.keys())
+            for key in obs:
+                if isinstance(obs[key], dict):
+                    print(f"{key} subkeys:", obs[key].keys())
+                else:
+                    print(f"{key} type:", type(obs[key]))
+        
         # Initialize processed observation with zeros
         processed = {
             'map_features': np.zeros((self.map_size, self.map_size, 4), dtype=np.float32),
@@ -146,12 +155,28 @@ class LuxRLWrapper(gym.Wrapper):
         # Extract data based on observation type
         if isinstance(obs, dict):
             # Process dictionary observation
-            map_features = np.array(obs['map_features']['tile_type'], dtype=np.float32)
-            unit_positions = np.array(obs['units']['position'], dtype=np.float32)
-            unit_energy = np.array(obs['units']['energy'], dtype=np.float32)
-            units_mask = np.array(obs['units_mask'], dtype=np.float32)
-            team_points = np.array(obs['team_points'], dtype=np.float32)
-            match_steps = float(obs['match_steps'])
+            try:
+                # Try to access observation fields with error handling
+                if 'board' in obs:
+                    map_features = np.array(obs['board'].get('tile_type', np.zeros((self.map_size, self.map_size))), dtype=np.float32)
+                else:
+                    map_features = np.zeros((self.map_size, self.map_size))
+                
+                if 'units' in obs:
+                    unit_data = obs['units']
+                    unit_positions = np.array(unit_data.get('position', np.zeros((self.max_units, 2))), dtype=np.float32)
+                    unit_energy = np.array(unit_data.get('energy', np.zeros((self.max_units, 1))), dtype=np.float32)
+                else:
+                    unit_positions = np.zeros((self.max_units, 2))
+                    unit_energy = np.zeros((self.max_units, 1))
+                
+                units_mask = np.array(obs.get('units_mask', np.zeros(self.max_units)), dtype=np.float32)
+                team_points = np.array(obs.get('team_points', [0, 0]), dtype=np.float32)
+                match_steps = float(obs.get('match_steps', 0))
+            except Exception as e:
+                print("Error processing observation:", e)
+                print("Observation structure:", obs)
+                raise
         else:
             # Process EnvObs instance
             map_features = np.array(obs.map_features.tile_type, dtype=np.float32)
@@ -164,8 +189,8 @@ class LuxRLWrapper(gym.Wrapper):
         # Normalize and assign features
         processed['map_features'][:, :, 0] = map_features / 2.0  # Normalize by max tile type (2)
         processed['unit_states'][:, :2] = unit_positions / self.map_size  # Normalize positions
-        processed['unit_states'][:, 2:3] = unit_energy[:, :, None] / 100.0  # Normalize energy
-        processed['unit_states'][:, 3:4] = units_mask[:, :, None]  # Add unit mask
+        processed['unit_states'][:, 2] = unit_energy / 100.0  # Normalize energy
+        processed['unit_states'][:, 3] = units_mask  # Add unit mask
         
         # Set global state
         processed['global_state'][0] = self.current_step / self.max_steps
