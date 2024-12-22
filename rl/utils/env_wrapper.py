@@ -157,39 +157,35 @@ class LuxRLWrapper(gym.Wrapper):
             'global_state': np.zeros(4, dtype=np.float32)
         }
         
-        # Extract data based on observation type
-        if isinstance(obs, dict):
-            # Process dictionary observation
-            try:
-                # Try to access observation fields with error handling
-                if 'board' in obs:
-                    map_features = np.array(obs['board'].get('tile_type', np.zeros((self.map_size, self.map_size))), dtype=np.float32)
-                else:
-                    map_features = np.zeros((self.map_size, self.map_size))
-                
-                if 'units' in obs:
-                    unit_data = obs['units']
-                    unit_positions = np.array(unit_data.get('position', np.zeros((self.max_units, 2))), dtype=np.float32)
-                    unit_energy = np.array(unit_data.get('energy', np.zeros((self.max_units, 1))), dtype=np.float32)
-                else:
-                    unit_positions = np.zeros((self.max_units, 2))
-                    unit_energy = np.zeros((self.max_units, 1))
-                
-                units_mask = np.array(obs.get('units_mask', np.zeros(self.max_units)), dtype=np.float32)
-                team_points = np.array(obs.get('team_points', [0, 0]), dtype=np.float32)
-                match_steps = float(obs.get('match_steps', 0))
-            except Exception as e:
-                print("Error processing observation:", e)
-                print("Observation structure:", obs)
-                raise
+        # Extract player_0's observation
+        if isinstance(obs, dict) and 'player_0' in obs:
+            player_obs = obs['player_0']
         else:
-            # Process EnvObs instance
-            map_features = np.array(obs.map_features.tile_type, dtype=np.float32)
-            unit_positions = obs.units.position.astype(np.float32)
-            unit_energy = obs.units.energy.astype(np.float32)
-            units_mask = obs.units_mask.astype(np.float32)
-            team_points = obs.team_points.astype(np.float32)
-            match_steps = float(obs.match_steps)
+            player_obs = obs
+            
+        # Process EnvObs instance
+        try:
+            if isinstance(player_obs, EnvObs):
+                # Extract features from EnvObs
+                map_features = np.array(player_obs.map_features.tile_type, dtype=np.float32)
+                unit_positions = player_obs.units.position.astype(np.float32)
+                unit_energy = player_obs.units.energy.astype(np.float32)
+                units_mask = player_obs.units_mask.astype(np.float32)
+                team_points = player_obs.team_points.astype(np.float32)
+                match_steps = float(player_obs.match_steps)
+            else:
+                # Fallback to zeros if structure is unexpected
+                print("Warning: Unexpected observation structure")
+                map_features = np.zeros((self.map_size, self.map_size))
+                unit_positions = np.zeros((self.max_units, 2))
+                unit_energy = np.zeros((self.max_units, 1))
+                units_mask = np.zeros(self.max_units)
+                team_points = np.zeros(2)
+                match_steps = 0.0
+        except Exception as e:
+            print("Error processing observation:", e)
+            print("Observation structure:", obs)
+            raise
         
         # Normalize and assign features
         processed['map_features'][:, :, 0] = map_features / 2.0  # Normalize by max tile type (2)

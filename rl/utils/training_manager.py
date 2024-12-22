@@ -171,14 +171,31 @@ class SeriesTrainingManager:
                 done_value = done.get('player_0', False)
             else:
                 done_value = bool(done)
+                
+            # Handle truncated dictionary
+            if isinstance(truncated, dict):
+                truncated_value = truncated.get('player_0', False)
+            else:
+                truncated_value = bool(truncated)
+                
+            # Convert JAX arrays to numpy arrays if needed
+            def convert_to_numpy(x):
+                if hasattr(x, 'numpy'):  # JAX array
+                    return x.numpy()
+                return x
+                
+            # Convert observations to numpy
+            obs_numpy = {k: convert_to_numpy(v) for k, v in obs.items()}
+            next_obs_numpy = {k: convert_to_numpy(v) for k, v in next_obs.items()}
+            action_numpy = convert_to_numpy(action)
             
             # Store transition for training
             self.agent.train_step(
-                obs,
-                action,
+                obs_numpy,
+                action_numpy,
                 reward_value,
-                done_value,
-                next_obs
+                done_value or truncated_value,  # Episode ends if either is True
+                next_obs_numpy
             )
             
             obs = next_obs
