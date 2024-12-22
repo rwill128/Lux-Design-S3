@@ -8,13 +8,14 @@ This script ties together the custom components:
 
 import os
 import argparse
+import torch
 from typing import Dict, Any
 import yaml
 
 from luxai_s3.wrappers import LuxAIS3GymEnv
-from utils.env_wrapper import LuxRLWrapper
-from agents.ppo_agent import LuxPPOAgent
-from utils.training_manager import SeriesTrainingManager
+from rl.utils.env_wrapper import LuxRLWrapper
+from rl.agents.ppo_agent import LuxPPOAgent
+from rl.utils.training_manager import SeriesTrainingManager
 
 
 def parse_args():

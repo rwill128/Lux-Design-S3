@@ -9,9 +9,8 @@ This module provides a wrapper around the LuxAIS3GymEnv that implements:
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
-from luxai_s3.state import EnvState
-
-from src.luxai_s3.wrappers import LuxAIS3GymEnv
+from luxai_s3.state import EnvState, EnvObs
+from luxai_s3.wrappers import LuxAIS3GymEnv
 
 
 class LuxRLWrapper(gym.Wrapper):
@@ -132,29 +131,47 @@ class LuxRLWrapper(gym.Wrapper):
         """Process and normalize the raw observation from the environment.
         
         Args:
-            obs: Raw observation from environment
+            obs: Raw observation from environment (dict or EnvObs)
             
         Returns:
             dict: Processed observation
         """
-        # Extract state from observation
-        state = json_to_state_object(obs)
-        
-        # Initialize processed observation
+        # Initialize processed observation with zeros
         processed = {
             'map_features': np.zeros((self.map_size, self.map_size, 4), dtype=np.float32),
             'unit_states': np.zeros((self.max_units, 6), dtype=np.float32),
             'global_state': np.zeros(4, dtype=np.float32)
         }
         
-        # Process map features (simplified for now)
-        # TODO: Add full map feature processing
+        # Extract data based on observation type
+        if isinstance(obs, dict):
+            # Process dictionary observation
+            map_features = np.array(obs['map_features']['tile_type'], dtype=np.float32)
+            unit_positions = np.array(obs['units']['position'], dtype=np.float32)
+            unit_energy = np.array(obs['units']['energy'], dtype=np.float32)
+            units_mask = np.array(obs['units_mask'], dtype=np.float32)
+            team_points = np.array(obs['team_points'], dtype=np.float32)
+            match_steps = float(obs['match_steps'])
+        else:
+            # Process EnvObs instance
+            map_features = np.array(obs.map_features.tile_type, dtype=np.float32)
+            unit_positions = obs.units.position.astype(np.float32)
+            unit_energy = obs.units.energy.astype(np.float32)
+            units_mask = obs.units_mask.astype(np.float32)
+            team_points = obs.team_points.astype(np.float32)
+            match_steps = float(obs.match_steps)
         
-        # Process unit states (simplified for now)
-        # TODO: Add full unit state processing
+        # Normalize and assign features
+        processed['map_features'][:, :, 0] = map_features / 2.0  # Normalize by max tile type (2)
+        processed['unit_states'][:, :2] = unit_positions / self.map_size  # Normalize positions
+        processed['unit_states'][:, 2:3] = unit_energy[:, :, None] / 100.0  # Normalize energy
+        processed['unit_states'][:, 3:4] = units_mask[:, :, None]  # Add unit mask
         
-        # Process global state
+        # Set global state
         processed['global_state'][0] = self.current_step / self.max_steps
+        processed['global_state'][1] = team_points[0] / 100.0
+        processed['global_state'][2] = team_points[1] / 100.0
+        processed['global_state'][3] = match_steps / self.max_steps
         
         return processed
         
