@@ -185,15 +185,17 @@ class SeriesTrainingManager:
                         arr = x.numpy()
                         # Handle scalar JAX arrays
                         if not arr.shape:  # scalar array
-                            return np.array([float(arr)])
-                        return arr
+                            return np.array([float(arr)], dtype=np.float32)
+                        return arr.astype(np.float32)
                     if isinstance(x, (bool, int, float)):
-                        return np.array([float(x)])
+                        return np.array([float(x)], dtype=np.float32)
+                    if isinstance(x, np.ndarray):
+                        return x.astype(np.float32)
                     return x
                 except Exception as e:
-                    print(f"Error converting to numpy: {e}")
-                    print(f"Input type: {type(x)}")
-                    print(f"Input value: {x}")
+                    print(f"[training_manager] Error converting to numpy: {e}")
+                    print(f"[training_manager] Input type: {type(x)}")
+                    print(f"[training_manager] Input value: {x}")
                     raise
                 
             # Convert observations to numpy

@@ -194,11 +194,23 @@ class LuxPPOAgent:
         """
         # Convert JAX arrays to numpy if needed
         def to_numpy(x):
-            if hasattr(x, 'numpy'):  # JAX array
-                return x.numpy()
-            if isinstance(x, (bool, int, float)):
-                return np.array([x])
-            return x
+            try:
+                if hasattr(x, 'numpy'):  # JAX array
+                    arr = x.numpy()
+                    # Handle scalar JAX arrays
+                    if not arr.shape:  # scalar array
+                        return np.array([float(arr)], dtype=np.float32)
+                    return arr.astype(np.float32)
+                if isinstance(x, (bool, int, float)):
+                    return np.array([float(x)], dtype=np.float32)
+                if isinstance(x, np.ndarray):
+                    return x.astype(np.float32)
+                return x
+            except Exception as e:
+                print(f"[predict] Error converting to numpy: {e}")
+                print(f"[predict] Input type: {type(x)}")
+                print(f"[predict] Input value: {x}")
+                raise
 
         # Convert inputs to numpy arrays first
         obs_numpy = {k: to_numpy(v) for k, v in obs.items()}
@@ -243,11 +255,28 @@ class LuxPPOAgent:
         """
         # Convert JAX arrays to numpy if needed
         def to_numpy(x):
-            if hasattr(x, 'numpy'):  # JAX array
-                return x.numpy()
-            if isinstance(x, (bool, int, float)):
-                return np.array([x])
-            return x
+            try:
+                if hasattr(x, 'numpy'):  # JAX array
+                    arr = x.numpy()
+                    # Handle scalar JAX arrays
+                    if not arr.shape:  # scalar array
+                        return np.array([float(arr)], dtype=np.float32)
+                    return arr.astype(np.float32)
+                if isinstance(x, (bool, int, float)):
+                    return np.array([float(x)], dtype=np.float32)
+                if isinstance(x, np.ndarray):
+                    return x.astype(np.float32)
+                return x
+            except Exception as e:
+                print(f"[train_step] Error converting to numpy: {e}")
+                print(f"[train_step] Input type: {type(x)}")
+                print(f"[train_step] Input value: {x}")
+                raise
+
+        # Debug info for inputs
+        print(f"[train_step] dones type: {type(dones)}")
+        if hasattr(dones, 'numpy'):
+            print(f"[train_step] dones JAX shape: {dones.shape if hasattr(dones, 'shape') else 'no shape'}")
 
         # Convert inputs to numpy arrays first
         obs_numpy = {k: to_numpy(v) for k, v in obs.items()}
