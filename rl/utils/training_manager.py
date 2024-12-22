@@ -180,9 +180,21 @@ class SeriesTrainingManager:
                 
             # Convert JAX arrays to numpy arrays if needed
             def convert_to_numpy(x):
-                if hasattr(x, 'numpy'):  # JAX array
-                    return x.numpy()
-                return x
+                try:
+                    if hasattr(x, 'numpy'):  # JAX array
+                        arr = x.numpy()
+                        # Handle scalar JAX arrays
+                        if not arr.shape:  # scalar array
+                            return np.array([float(arr)])
+                        return arr
+                    if isinstance(x, (bool, int, float)):
+                        return np.array([float(x)])
+                    return x
+                except Exception as e:
+                    print(f"Error converting to numpy: {e}")
+                    print(f"Input type: {type(x)}")
+                    print(f"Input value: {x}")
+                    raise
                 
             # Convert observations to numpy
             obs_numpy = {k: convert_to_numpy(v) for k, v in obs.items()}
