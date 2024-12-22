@@ -213,8 +213,12 @@ class SeriesTrainingManager:
             )
             
             obs = next_obs
-            total_reward += reward
+            total_reward += reward_value  # Use the extracted scalar reward value
             steps += 1
+            
+            # Debug step info
+            print(f"[training_manager] total_reward type: {type(total_reward)}")
+            print(f"[training_manager] total_reward value: {total_reward}")
             
         return {
             'won': info.get('winner', 0) == 1,  # Assuming player 1 is our agent

@@ -284,6 +284,17 @@ class LuxPPOAgent:
         rewards_numpy = to_numpy(rewards)
         dones_numpy = to_numpy(dones)
 
+        # Debug info for numpy arrays
+        print(f"[train_step] dones_numpy type: {type(dones_numpy)}")
+        print(f"[train_step] dones_numpy shape: {dones_numpy.shape if hasattr(dones_numpy, 'shape') else 'no shape'}")
+        print(f"[train_step] dones_numpy value: {dones_numpy}")
+
+        # Ensure dones is properly shaped for tensor conversion
+        if isinstance(dones_numpy, np.ndarray) and not dones_numpy.shape:
+            dones_numpy = np.array([float(dones_numpy)], dtype=np.float32)
+        elif not isinstance(dones_numpy, np.ndarray):
+            dones_numpy = np.array([float(dones_numpy)], dtype=np.float32)
+
         # Convert numpy arrays to tensors
         obs_tensor = {
             k: torch.FloatTensor(v).to(self.device)
@@ -292,13 +303,19 @@ class LuxPPOAgent:
         actions_tensor = torch.FloatTensor(actions_numpy).to(self.device)
         rewards_tensor = torch.FloatTensor(rewards_numpy).to(self.device)
         dones_tensor = torch.FloatTensor(dones_numpy).to(self.device)
+
+        # Debug info for tensors
+        print(f"[train_step] dones_tensor shape: {dones_tensor.shape}")
+        print(f"[train_step] dones_tensor value: {dones_tensor}")
         
         # Compute advantages using GAE
         with torch.no_grad():
             _, values = self.policy(obs_tensor)
+            # Convert next_obs to numpy first
+            next_obs_numpy = {k: to_numpy(v) for k, v in next_obs.items()}
             _, next_values = self.policy({
                 k: torch.FloatTensor(v).to(self.device)
-                for k, v in next_obs.items()
+                for k, v in next_obs_numpy.items()
             })
             
             advantages = self._compute_gae(
@@ -321,6 +338,14 @@ class LuxPPOAgent:
             ratio = torch.exp(log_probs)
             surr1 = ratio * advantages
             surr2 = torch.clamp(ratio, 1.0 - self.clip_range, 1.0 + self.clip_range) * advantages
+            
+            # Ensure tensors have matching shapes for loss calculation
+            if values.shape != returns.shape:
+                values = values.view(returns.shape)
+            
+            # Debug shapes before loss calculation
+            print(f"[train_step] values shape before loss: {values.shape}")
+            print(f"[train_step] returns shape before loss: {returns.shape}")
             
             # Calculate losses
             policy_loss = -torch.min(surr1, surr2).mean()
