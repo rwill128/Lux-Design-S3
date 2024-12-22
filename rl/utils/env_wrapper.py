@@ -128,7 +128,7 @@ class LuxRLWrapper(gym.Wrapper):
         
         # Process observation and shape reward
         processed_obs = self._process_observation(obs)
-        shaped_reward = self._shape_reward(reward, info)
+        shaped_reward = self._shape_reward(reward, info, obs)  # Pass obs which contains state info
         
         return processed_obs, shaped_reward, terminated, truncated, info
         
@@ -166,32 +166,47 @@ class LuxRLWrapper(gym.Wrapper):
         # Process EnvObs instance
         try:
             if isinstance(player_obs, EnvObs):
+                from luxai_s3.utils import to_numpy
+                
                 # Extract features from EnvObs
-                map_features = np.array(player_obs.map_features.tile_type, dtype=np.float32)
+                map_features = to_numpy(player_obs.map_features.tile_type)
+                map_features = np.array(map_features, dtype=np.float32)
+                print("[process_observation] map_features shape:", map_features.shape)
                 
                 # Handle unit positions - extract player 0's units and reshape
-                raw_positions = player_obs.units.position
+                raw_positions = to_numpy(player_obs.units.position)
+                print("[process_observation] raw_positions shape:", raw_positions.shape)
                 if len(raw_positions.shape) == 3:  # Shape is (2, 16, 2)
-                    unit_positions = raw_positions[0].astype(np.float32)  # Take player 0's units
+                    unit_positions = raw_positions[0]  # Take player 0's units
                 else:
-                    unit_positions = raw_positions.astype(np.float32)
+                    unit_positions = raw_positions
+                unit_positions = np.array(unit_positions, dtype=np.float32)
                     
                 # Handle unit energy similarly
-                raw_energy = player_obs.units.energy
+                raw_energy = to_numpy(player_obs.units.energy)
+                print("[process_observation] raw_energy shape:", raw_energy.shape)
                 if len(raw_energy.shape) == 2:  # Shape might be (2, 16)
-                    unit_energy = raw_energy[0].reshape(-1, 1).astype(np.float32)  # Take player 0's units
+                    unit_energy = raw_energy[0]  # Take player 0's units
                 else:
-                    unit_energy = raw_energy.reshape(-1, 1).astype(np.float32)
+                    unit_energy = raw_energy
+                unit_energy = np.array(unit_energy, dtype=np.float32).reshape(-1, 1)
                     
                 # Handle units mask
-                raw_mask = player_obs.units_mask
+                raw_mask = to_numpy(player_obs.units_mask)
+                print("[process_observation] raw_mask shape:", raw_mask.shape)
                 if len(raw_mask.shape) == 2:  # Shape might be (2, 16)
-                    units_mask = raw_mask[0].astype(np.float32)  # Take player 0's mask
+                    units_mask = raw_mask[0]  # Take player 0's mask
                 else:
-                    units_mask = raw_mask.astype(np.float32)
+                    units_mask = raw_mask
+                units_mask = np.array(units_mask, dtype=np.float32)
                     
-                team_points = player_obs.team_points.astype(np.float32)
-                match_steps = float(player_obs.match_steps)
+                team_points = to_numpy(player_obs.team_points)
+                print("[process_observation] team_points:", team_points)
+                team_points = np.array(team_points, dtype=np.float32)
+                
+                match_steps = to_numpy(player_obs.match_steps)
+                print("[process_observation] match_steps:", match_steps)
+                match_steps = float(match_steps)
             else:
                 # Fallback to zeros if structure is unexpected
                 print("Warning: Unexpected observation structure")
@@ -251,16 +266,19 @@ class LuxRLWrapper(gym.Wrapper):
         }
         return env_action
         
-    def _shape_reward(self, reward, info):
-        """Shape the reward to encourage desired behavior.
+    def _shape_reward(self, reward, info, obs):
+        """Shape the reward to encourage desired behavior with intermediate rewards.
         
         Args:
             reward: Original reward from environment
             info: Additional information from step
+            obs: Observation containing state information
             
         Returns:
             float: Shaped reward
         """
+        from luxai_s3.utils import to_numpy
+        
         # Extract player rewards from dict if necessary
         if isinstance(reward, dict):
             player_reward = reward.get('player_0', 0)
@@ -273,30 +291,74 @@ class LuxRLWrapper(gym.Wrapper):
             
         shaped_reward = player_reward
         
-        # Debug info dictionary
-        print("[shape_reward] info type:", type(info))
-        if info and isinstance(info, dict):
-            print("[shape_reward] info keys:", info.keys())
+        # Extract state information from observation
+        if isinstance(obs, dict) and 'player_0' in obs:
+            player_obs = obs['player_0']
+        else:
+            player_obs = obs
             
-            # Debug player info
-            if 'player_0' in info:
-                print("[shape_reward] player_0 info:", info['player_0'])
-            if 'player_1' in info:
-                print("[shape_reward] player_1 info:", info['player_1'])
-            
-            # Reward for points difference
-            if 'player_0' in info and 'player_1' in info:
-                points_diff = info['player_0'].get('points', 0) - info['player_1'].get('points', 0)
+        # Add reward shaping based on state information
+        if hasattr(player_obs, 'team_points'):
+            points = to_numpy(player_obs.team_points)  # Convert JAX array to numpy
+            if len(points.shape) > 0:  # Check if points is an array
+                points_diff = float(points[0] - points[1])  # player_0 - player_1
                 print("[shape_reward] points_diff:", points_diff)
-                shaped_reward += points_diff * 0.01  # Small bonus for point difference
-            
-            # Reward for winning/losing
-            if 'winner' in info:
-                print("[shape_reward] winner:", info['winner'])
-                if info['winner'] == 'player_0':
-                    shaped_reward += 1.0  # Bonus for winning
-                elif info['winner'] == 'player_1':
-                    shaped_reward -= 1.0  # Penalty for losing
+                shaped_reward += points_diff * 0.1  # Increased bonus for point difference
+                
+        # Add unit-based rewards
+        if hasattr(player_obs, 'units') and hasattr(player_obs, 'units_mask'):
+            units = player_obs.units
+            mask = to_numpy(player_obs.units_mask)
+            if len(mask.shape) > 1:  # Shape is (2, 16)
+                mask = mask[0]  # Take player 0's mask
+                
+            # Get energy values for active units
+            energy = to_numpy(units.energy)
+            if len(energy.shape) > 1:  # Shape is (2, 16)
+                energy = energy[0]  # Take player 0's units
+                
+            # Reward for unit survival and energy management
+            active_units = np.where(mask > 0)[0]  # Get indices of active units
+            for i in active_units:
+                unit_energy = float(energy[i])
+                # Small positive reward for maintaining energy above 0
+                shaped_reward += 0.01 if unit_energy > 0 else -0.01
+                # Bonus for high energy
+                shaped_reward += 0.005 * (unit_energy / 100.0)  # Scale by max energy
+                
+                # Add proximity rewards for being near relic nodes
+                if hasattr(player_obs, 'relic_nodes_map_weights'):
+                    relic_weights = to_numpy(player_obs.relic_nodes_map_weights)
+                    positions = to_numpy(units.position)
+                    if len(positions.shape) > 2:
+                        positions = positions[0]  # Take player 0's units
+                    
+                    active_units = np.where(mask > 0)[0]  # Get indices of active units
+                    for i in active_units:
+                        pos = positions[i]
+                        # Check if unit is on or adjacent to relic node
+                        x, y = int(pos[0]), int(pos[1])
+                        if 0 <= x < 24 and 0 <= y < 24:  # Map bounds check
+                            if relic_weights[x, y] > 0:
+                                shaped_reward += 0.05  # Reward for being on relic node
+                            # Check adjacent tiles
+                            for dx, dy in [(-1,0), (1,0), (0,-1), (0,1)]:
+                                nx, ny = x + dx, y + dy
+                                if 0 <= nx < 24 and 0 <= ny < 24 and relic_weights[nx, ny] > 0:
+                                    shaped_reward += 0.02  # Smaller reward for being adjacent
+                
+        # Add win/loss reward based on match completion
+        if hasattr(player_obs, 'match_steps') and hasattr(player_obs, 'team_wins'):
+            match_steps = to_numpy(player_obs.match_steps)  # Convert JAX array to numpy
+            match_ended = match_steps == -1
+            if match_ended:
+                wins = to_numpy(player_obs.team_wins)  # Convert JAX array to numpy
+                if len(wins.shape) > 0:  # Check if wins is an array
+                    if wins[0] > wins[1]:  # player_0 won
+                        shaped_reward += 5.0  # Increased bonus for winning
+                    elif wins[0] < wins[1]:  # player_0 lost
+                        shaped_reward -= 2.0  # Reduced penalty for losing
+                    print("[shape_reward] match_ended, wins:", wins)
                     
         print("[shape_reward] final shaped_reward:", shaped_reward)
         
