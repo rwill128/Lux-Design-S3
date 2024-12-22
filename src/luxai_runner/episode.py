@@ -30,6 +30,7 @@ class EpisodeConfig:
     render: Optional[bool] = True
     save_replay_path: Optional[str] = None
     replay_options: ReplayConfig = field(default_factory=ReplayConfig)
+    direct_import_python_bots: Optional[bool] = True  # Enable direct Python imports by default
 
 
 @dataclass
@@ -104,7 +105,13 @@ window.episode = {json.dumps(replay)};
         start_tasks = []
         save_replay = self.cfg.save_replay_path is not None
         for i in range(2):
-            player = Bot(self.players[i], f"player_{i}", i, verbose=self.log.verbosity)
+            player = Bot(
+                self.players[i], 
+                f"player_{i}", 
+                i, 
+                verbose=self.log.verbosity,
+                direct_import_python_bots=self.cfg.direct_import_python_bots
+            )
             player.proc.log.identifier = player.log.identifier
             players[player.agent] = player
             start_tasks += [player.proc.start()]

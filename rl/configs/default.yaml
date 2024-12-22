@@ -15,8 +15,8 @@ ppo:
 
 # Training parameters
 training:
-  device: "cuda" if torch.cuda.is_available() else "cpu"
-  num_series: 1000
+  device: "cpu"  # No CUDA available
+  num_series: 20  # Reduced from 1000 for quick testing
   series_length: 5
   max_steps: 100
   eval_interval: 10

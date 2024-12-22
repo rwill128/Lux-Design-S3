@@ -84,8 +84,15 @@ class LuxAIS3GymEnv(gym.Env):
         self, action: Any
     ) -> tuple[Any, SupportsFloat, bool, bool, dict[str, Any]]:
         self.rng_key, step_key = jax.random.split(self.rng_key)
+        
+        # Convert numpy arrays to JAX arrays
+        jax_action = {
+            "player_0": jax.numpy.asarray(action["player_0"], dtype=jax.numpy.int16),
+            "player_1": jax.numpy.asarray(action["player_1"], dtype=jax.numpy.int16)
+        }
+        
         obs, self.state, reward, terminated, truncated, info = self.jax_env.step(
-            step_key, self.state, action, self.env_params
+            step_key, self.state, jax_action, self.env_params
         )
         if self.numpy_output:
             obs = to_numpy(flax.serialization.to_state_dict(obs))

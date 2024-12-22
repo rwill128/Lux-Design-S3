@@ -68,9 +68,14 @@ class Bot:
         stderr = None
         try:
             if self.direct_import_python_bots and self.command == "python":
-                env_cfg = None
+                # Ensure env_cfg is available with default values if not in info
+                env_cfg = {
+                    "max_units": 100,  # Default max units
+                    "map_size": 64,    # Default map size
+                    "max_episode_length": 1000  # Default episode length
+                }
                 if "env_cfg" in info:
-                    env_cfg = observations["info"]["env_cfg"]
+                    env_cfg.update(observations["info"]["env_cfg"])
                 observations = Namespace(**observations)
                 observations.obs = json.dumps(observations.obs)
                 action = self.proc.agent_fn(observations, dict(env_cfg=env_cfg))
@@ -82,8 +87,9 @@ class Bot:
                 )
         except asyncio.TimeoutError:
             action = None
-        except:
-            import ipdb;ipdb.set_trace()
+        except Exception as e:
+            self.log.err(f"Error during step: {str(e)}")
+            action = None
         time_used = time.time() - stime
         if stderr != "" and stderr is not None:
             self.log.err(f"stderr:\n{stderr}")
@@ -98,9 +104,19 @@ class Bot:
         else:
             try:
                 if isinstance(action, dict):
-                    return action["action"]
-                action = json.loads(action)["action"]
-            except:
-                self.log.err(f"cannot parse action '{action}'")
+                    # If it's already a dictionary with player actions, return it directly
+                    if "player_0" in action or "player_1" in action:
+                        # Get the actions for the current player
+                        return action[self.agent]
+                    # Otherwise, try to get the action field
+                    return action.get("action", None)
+                # Try to parse JSON if it's a string
+                if isinstance(action, str):
+                    action = json.loads(action)
+                    if "player_0" in action or "player_1" in action:
+                        return action[self.agent]
+                    return action.get("action", None)
+            except Exception as e:
+                self.log.err(f"cannot parse action '{action}': {str(e)}")
                 action = None
         return action

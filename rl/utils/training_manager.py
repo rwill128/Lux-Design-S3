@@ -147,30 +147,130 @@ class SeriesTrainingManager:
             dict: Match metrics
         """
         obs = self.env.reset()
-        done = False
-        truncated = False
+        done_value = False
+        truncated_value = False
         total_reward = 0
         steps = 0
         
-        while not (done or truncated) and steps < self.max_steps:
+        # Lists to store experiences
+        observations = []
+        next_observations = []
+        actions = []
+        rewards = []
+        dones = []
+        
+        # Convert JAX arrays to numpy arrays if needed
+        def convert_to_numpy(x):
+            try:
+                if hasattr(x, 'numpy'):  # JAX array
+                    arr = x.numpy()
+                    # Handle scalar JAX arrays
+                    if not arr.shape:  # scalar array
+                        return np.array([float(arr)], dtype=np.float32)
+                    return arr.astype(np.float32)
+                if isinstance(x, (bool, int, float)):
+                    return np.array([float(x)], dtype=np.float32)
+                if isinstance(x, np.ndarray):
+                    return x.astype(np.float32)
+                return x
+            except Exception as e:
+                print(f"[training_manager] Error converting to numpy: {e}")
+                print(f"[training_manager] Input type: {type(x)}")
+                print(f"[training_manager] Input value: {x}")
+                raise
+        
+        # Collect experience batch
+        batch_size = 8  # Collect 8 steps before training
+        while not (done_value or truncated_value) and steps < self.max_steps:
+            # Convert current observation to numpy
+            obs_numpy = {k: convert_to_numpy(v) for k, v in obs.items()}
+            
             # Get action from agent
             action, _ = self.agent.predict(obs)
+            action_numpy = convert_to_numpy(action)
             
             # Take step in environment
             next_obs, reward, done, truncated, info = self.env.step(action)
             
-            # Store transition for training
-            self.agent.train_step(
-                obs,
-                action,
-                reward,
-                done,
-                next_obs
-            )
+            # Debug environment step outputs
+            print(f"[training_manager] reward type: {type(reward)}")
+            print(f"[training_manager] reward value: {reward}")
+            print(f"[training_manager] done type: {type(done)}")
+            print(f"[training_manager] done value: {done}")
             
+            # Extract scalar values
+            if isinstance(reward, dict):
+                reward_value = reward.get('player_0', 0.0)
+            else:
+                reward_value = float(reward)
+                
+            if isinstance(done, dict):
+                done_value = done.get('player_0', False)
+            else:
+                done_value = bool(done)
+                
+            if isinstance(truncated, dict):
+                truncated_value = truncated.get('player_0', False)
+            else:
+                truncated_value = bool(truncated)
+            
+            # Convert next observation to numpy
+            next_obs_numpy = {k: convert_to_numpy(v) for k, v in next_obs.items()}
+            
+            # Store experiences
+            observations.append(obs_numpy)
+            next_observations.append(next_obs_numpy)
+            actions.append(action_numpy)
+            rewards.append(reward_value)
+            dones.append(done_value or truncated_value)
+            
+            # Update for next step
             obs = next_obs
-            total_reward += reward
+            total_reward += reward_value
             steps += 1
+            
+            # Train if we have enough experiences
+            if len(observations) >= batch_size or done_value or truncated_value:
+                # Convert lists to numpy arrays with proper shapes
+                rewards_array = np.array(rewards, dtype=np.float32).reshape(-1, 1)
+                dones_array = np.array(dones, dtype=np.float32).reshape(-1, 1)
+                actions_array = np.stack(actions)
+                
+                # Stack observations into proper format
+                stacked_obs = {}
+                for key in observations[0].keys():
+                    # Stack arrays for each observation key
+                    stacked_obs[key] = np.stack([obs[key] for obs in observations])
+                
+                stacked_next_obs = {}
+                for key in next_observations[0].keys():
+                    # Stack arrays for each next observation key
+                    stacked_next_obs[key] = np.stack([obs[key] for obs in next_observations])
+                
+                print(f"[training_manager] Training with batch size: {len(observations)}")
+                print(f"[training_manager] rewards shape: {rewards_array.shape}")
+                print(f"[training_manager] dones shape: {dones_array.shape}")
+                print(f"[training_manager] actions shape: {actions_array.shape}")
+                print(f"[training_manager] observations shape: {[(k, v.shape) for k, v in stacked_obs.items()]}")
+                
+                # Train on collected experiences
+                self.agent.train_step(
+                    stacked_obs,
+                    actions_array,
+                    rewards_array,
+                    dones_array,
+                    stacked_next_obs
+                )
+                
+                # Clear experience buffers
+                observations = []
+                next_observations = []
+                actions = []
+                rewards = []
+                dones = []
+            
+            # Debug step info
+            print(f"[training_manager] total_reward: {total_reward}")
             
         return {
             'won': info.get('winner', 0) == 1,  # Assuming player 1 is our agent
