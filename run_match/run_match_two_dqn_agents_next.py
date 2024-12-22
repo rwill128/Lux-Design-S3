@@ -22,6 +22,24 @@ EPS_DECAY = 0.9995 # decay per step
 BATCH_SIZE = 32
 MAX_MEMORY_SIZE = 20000
 
+
+def flatten_config(env_cfg):
+    """
+    Turn the env_cfg dict into a fixed-size vector of 10 elements.
+    """
+    return np.array([
+        env_cfg["max_units"],
+        env_cfg["match_count_per_episode"],
+        env_cfg["max_steps_in_match"],
+        env_cfg["map_height"],
+        env_cfg["map_width"],
+        env_cfg["num_teams"],
+        env_cfg["unit_move_cost"],
+        env_cfg["unit_sap_cost"],
+        env_cfg["unit_sap_range"],
+        env_cfg["unit_sensor_range"],
+    ], dtype=np.float32)
+
 # We'll define a small feedforward network for Q-values:
 class QNetwork(nn.Module):
     def __init__(self, input_dim, output_dim):
@@ -269,6 +287,19 @@ def evaluate_agents(agent_1_cls, agent_2_cls, seed=45, games_to_play=3, replay_s
             last_reward_1 = reward["player_1"]
 
             step += 1
+
+        player_0.act(
+            step=step,
+            obs=obs["player_0"],
+            reward=last_reward_0,
+            done=game_done
+        )
+        player_1.act(
+            step=step,
+            obs=obs["player_1"],
+            reward=last_reward_1,
+            done=game_done
+        )
 
     env.close()
     print(f"Finished {games_to_play} games. Replays (if any) saved to {replay_save_dir}")
