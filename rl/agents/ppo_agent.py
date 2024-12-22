@@ -192,10 +192,21 @@ class LuxPPOAgent:
         Returns:
             tuple: (actions, None)
         """
+        # Convert JAX arrays to numpy if needed
+        def to_numpy(x):
+            if hasattr(x, 'numpy'):  # JAX array
+                return x.numpy()
+            if isinstance(x, (bool, int, float)):
+                return np.array([x])
+            return x
+
+        # Convert inputs to numpy arrays first
+        obs_numpy = {k: to_numpy(v) for k, v in obs.items()}
+
         # Convert numpy arrays to tensors
         obs_tensor = {
             k: torch.FloatTensor(v).to(self.device)
-            for k, v in obs.items()
+            for k, v in obs_numpy.items()
         }
         
         with torch.no_grad():
@@ -230,14 +241,28 @@ class LuxPPOAgent:
         Returns:
             dict: Training metrics
         """
+        # Convert JAX arrays to numpy if needed
+        def to_numpy(x):
+            if hasattr(x, 'numpy'):  # JAX array
+                return x.numpy()
+            if isinstance(x, (bool, int, float)):
+                return np.array([x])
+            return x
+
+        # Convert inputs to numpy arrays first
+        obs_numpy = {k: to_numpy(v) for k, v in obs.items()}
+        actions_numpy = to_numpy(actions)
+        rewards_numpy = to_numpy(rewards)
+        dones_numpy = to_numpy(dones)
+
         # Convert numpy arrays to tensors
         obs_tensor = {
             k: torch.FloatTensor(v).to(self.device)
-            for k, v in obs.items()
+            for k, v in obs_numpy.items()
         }
-        actions_tensor = torch.FloatTensor(actions).to(self.device)
-        rewards_tensor = torch.FloatTensor(rewards).to(self.device)
-        dones_tensor = torch.FloatTensor(dones).to(self.device)
+        actions_tensor = torch.FloatTensor(actions_numpy).to(self.device)
+        rewards_tensor = torch.FloatTensor(rewards_numpy).to(self.device)
+        dones_tensor = torch.FloatTensor(dones_numpy).to(self.device)
         
         # Compute advantages using GAE
         with torch.no_grad():
