@@ -26,7 +26,7 @@ class LuxRLWrapper(gym.Wrapper):
         
         # Cache map dimensions for faster access
         self.map_size = 24  # Fixed size for Lux AI S3
-        self.max_units = 4  # Maximum units per player
+        self.max_units = 16  # Maximum units per player (from environment)
         
         # Create observation and action spaces
         self.observation_space = self._create_observation_space()
@@ -72,22 +72,26 @@ class LuxRLWrapper(gym.Wrapper):
         })
         
     def _create_action_space(self):
-        """Create a simplified action space for each unit.
+        """Create an action space matching the environment's expectations.
         
-        The action space includes:
-        - Movement direction (5): center, up, right, down, left
-        - Action type (2): move, sap
-        - Target position (2): x, y coordinates for sap
+        The action space includes for each unit:
+        - Action type (0-6): NONE=0, MOVE_{UP,RIGHT,DOWN,LEFT}=1-4, SAP=5
+        - Target position (2): x, y coordinates for sap, range [-unit_sap_range, unit_sap_range]
         
         Returns:
             gym.spaces.Dict: The action space
         """
+        # Match environment's action space
+        low = np.zeros((16, 3), dtype=np.int16)  # Using env's max_units=16
+        low[:, 1:] = -5  # -unit_sap_range
+        high = np.ones((16, 3), dtype=np.int16) * 6  # 6 action types
+        high[:, 1:] = 5  # unit_sap_range
+        
         return spaces.Dict({
             'unit_actions': spaces.Box(
-                low=0,
-                high=1,
-                shape=(self.max_units, 4),  # direction, action_type, target_x, target_y
-                dtype=np.float32
+                low=low,
+                high=high,
+                dtype=np.int16
             )
         })
         
@@ -202,23 +206,28 @@ class LuxRLWrapper(gym.Wrapper):
         return processed
         
     def _process_action(self, action):
-        """Convert normalized actions to environment format.
+        """Convert actions to environment format.
         
         Args:
-            action: Normalized actions from policy
+            action: Actions from policy
             
         Returns:
             dict: Actions in environment format with player keys
         """
         # Convert action to numpy array if it's a dictionary
         if isinstance(action, dict):
-            action = action.get('unit_actions', np.zeros((self.max_units, 4), dtype=np.float32))
+            action = action.get('unit_actions', np.zeros((16, 3), dtype=np.int16))
         
-        # Ensure action is a numpy array
-        action = np.array(action, dtype=np.float32)
+        # Ensure action is a numpy array with correct dtype and shape
+        action = np.array(action, dtype=np.int16)
+        if action.shape != (16, 3):
+            # Pad or truncate to match expected shape
+            padded_action = np.zeros((16, 3), dtype=np.int16)
+            padded_action[:min(action.shape[0], 16), :min(action.shape[1], 3)] = action[:min(action.shape[0], 16), :min(action.shape[1], 3)]
+            action = padded_action
         
         # Create empty action array for opponent
-        opponent_action = np.zeros_like(action)
+        opponent_action = np.zeros((16, 3), dtype=np.int16)
         
         # Format actions with player keys
         env_action = {
