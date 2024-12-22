@@ -273,18 +273,31 @@ class LuxRLWrapper(gym.Wrapper):
             
         shaped_reward = player_reward
         
-        # Add reward shaping components
+        # Debug info dictionary
+        print("[shape_reward] info type:", type(info))
         if info and isinstance(info, dict):
+            print("[shape_reward] info keys:", info.keys())
+            
+            # Debug player info
+            if 'player_0' in info:
+                print("[shape_reward] player_0 info:", info['player_0'])
+            if 'player_1' in info:
+                print("[shape_reward] player_1 info:", info['player_1'])
+            
             # Reward for points difference
             if 'player_0' in info and 'player_1' in info:
                 points_diff = info['player_0'].get('points', 0) - info['player_1'].get('points', 0)
+                print("[shape_reward] points_diff:", points_diff)
                 shaped_reward += points_diff * 0.01  # Small bonus for point difference
             
             # Reward for winning/losing
             if 'winner' in info:
+                print("[shape_reward] winner:", info['winner'])
                 if info['winner'] == 'player_0':
                     shaped_reward += 1.0  # Bonus for winning
                 elif info['winner'] == 'player_1':
                     shaped_reward -= 1.0  # Penalty for losing
+                    
+        print("[shape_reward] final shaped_reward:", shaped_reward)
         
         return float(shaped_reward)  # Ensure we return a float
