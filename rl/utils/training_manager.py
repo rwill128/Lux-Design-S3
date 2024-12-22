@@ -147,24 +147,37 @@ class SeriesTrainingManager:
             dict: Match metrics
         """
         obs = self.env.reset()
-        done = False
+        done_value = False
         truncated = False
         total_reward = 0
         steps = 0
         
-        while not (done or truncated) and steps < self.max_steps:
+        while not (done_value or truncated) and steps < self.max_steps:
             # Get action from agent
             action, _ = self.agent.predict(obs)
             
             # Take step in environment
             next_obs, reward, done, truncated, info = self.env.step(action)
             
+            # Extract scalar values for training
+            # Handle reward dictionary
+            if isinstance(reward, dict):
+                reward_value = reward.get('player_0', 0.0)
+            else:
+                reward_value = float(reward)
+                
+            # Handle done dictionary
+            if isinstance(done, dict):
+                done_value = done.get('player_0', False)
+            else:
+                done_value = bool(done)
+            
             # Store transition for training
             self.agent.train_step(
                 obs,
                 action,
-                reward,
-                done,
+                reward_value,
+                done_value,
                 next_obs
             )
             
