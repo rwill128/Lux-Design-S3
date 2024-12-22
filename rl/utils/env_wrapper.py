@@ -189,8 +189,8 @@ class LuxRLWrapper(gym.Wrapper):
         # Normalize and assign features
         processed['map_features'][:, :, 0] = map_features / 2.0  # Normalize by max tile type (2)
         processed['unit_states'][:, :2] = unit_positions / self.map_size  # Normalize positions
-        processed['unit_states'][:, 2] = unit_energy / 100.0  # Normalize energy
-        processed['unit_states'][:, 3] = units_mask  # Add unit mask
+        processed['unit_states'][:, 2] = np.squeeze(unit_energy) / 100.0  # Normalize energy and ensure 1D array
+        processed['unit_states'][:, 3] = np.squeeze(units_mask)  # Add unit mask and ensure 1D array
         
         # Set global state
         processed['global_state'][0] = self.current_step / self.max_steps
