@@ -14,7 +14,7 @@ EPS_START = 1.0
 EPS_END = 0.1
 EPS_DECAY = 1e-4
 REPLAY_SIZE = 10_000
-BATCH_SIZE = 32
+BATCH_SIZE = 1000
 
 global_qnet_1 = None
 global_optim_1 = None
@@ -43,7 +43,7 @@ def flatten_config(env_cfg):
         env_cfg["unit_sensor_range"],
     ], dtype=np.float32)
 
-def maybe_init_globals(agent_id: int, state_dim: int, max_units: int, dx_range=5, dy_range=5):
+def maybe_init_globals(agent_id: int, state_dim: int, max_units: int):
     global global_qnet_1, global_optim_1, global_replay_buffer_1, global_epsilon_1
     global global_qnet_2, global_optim_2, global_replay_buffer_2, global_epsilon_2
 
@@ -55,7 +55,7 @@ def maybe_init_globals(agent_id: int, state_dim: int, max_units: int, dx_range=5
           - dx in some discrete range (e.g. 5 steps => [-2, -1, 0, +1, +2])
           - dy in that same discrete range
         """
-        def __init__(self, state_dim, max_units, dx_range=5, dy_range=5):
+        def __init__(self, state_dim, max_units, dx_range=21, dy_range=21):
             super(MultiUnitQNet, self).__init__()
             self.max_units = max_units
             self.dx_range = dx_range
@@ -179,8 +179,37 @@ def compute_q_loss(agent_id: int):
     next_states = torch.FloatTensor(next_states)
     dones = torch.FloatTensor(dones)
 
-    q_values = qnet(states)  # (batch_size, action_dim)
-    q_val_a = q_values.gather(1, actions.view(-1, 1)).squeeze(-1)
+    action_type_logits, dx_logits, dy_logits = qnet(states)
+    # actions has shape (batch_size, max_units, 3):
+    #    actions[..., 0] are action_type indices
+    #    actions[..., 1] are dx indices
+    #    actions[..., 2] are dy indices
+
+    # Gather action_type logits:
+    # shape of action_type_logits = (batch_size, max_units, 6)
+    at_q = action_type_logits.gather(
+        2, actions[..., 0].unsqueeze(-1)
+    ).squeeze(-1)
+    # => shape (batch_size, max_units)
+
+    # Gather dx logits:
+    # shape of dx_logits = (batch_size, max_units, dx_range)
+    dx_q = dx_logits.gather(
+        2, actions[..., 1].add(10).unsqueeze(-1)
+    ).squeeze(-1)
+
+    # Gather dy logits:
+    dy_q = dy_logits.gather(
+        2, actions[..., 2].add(10).unsqueeze(-1)
+    ).squeeze(-1)
+
+    # Now you have three 2D tensors, each shape (batch_size, max_units).
+    # If your “Q-value” is the sum of the three heads for each unit:
+    total_q = at_q + dx_q + dy_q
+
+    # If you want one Q per sample, you might sum across units:
+    # shape (batch_size,)
+    total_q_per_sample = total_q.sum(dim=1)
 
     with torch.no_grad():
         q_next = qnet(next_states)
@@ -195,49 +224,59 @@ def compute_q_loss(agent_id: int):
     optim_.step()
 
 
-def select_actions_from_qnet(qnet, state, max_units, dx_range=5, dy_range=5):
+def select_actions_from_qnet(qnet, state, max_units, dx_range=20, dy_range=20):
     """
     Args:
-        qnet: instance of MultiUnitQNet
-        state: np.ndarray or torch.Tensor of shape (state_dim,)
-        max_units: number of units to control
-        dx_range, dy_range: int, how many discrete values for x and y
+        qnet: your MultiUnitQNet, which returns a tuple of
+              (action_type_logits, dx_logits, dy_logits)
+        state: 1D np.array (state_dim,) with your observation
+        max_units: how many units max we can control
+        dx_range, dy_range: number of discrete sap deltas for x, y
+            e.g. 5 means possible values in [-2, -1, 0, +1, +2].
+
     Returns:
-        actions: np.ndarray of shape (max_units, 3), each row = [action_type, dx, dy]
+        actions: np.ndarray of shape (max_units, 3), where each row is:
+                 [action_type, dx, dy].
+                 If action_type != 5, dx=dy=0.
     """
-    # Convert state to torch and forward pass
-    state_t = torch.FloatTensor(state)
+    # Convert to a batch of size 1 for the network
+    state_t = torch.FloatTensor(state).unsqueeze(0)  # shape (1, state_dim)
+
     with torch.no_grad():
+        # Forward pass => each logits shape = (1, max_units, num_classes)
         at_logits, dx_logits, dy_logits = qnet(state_t)
-        # Each has shape (1, max_units, classes)
-        # So we remove the batch dim => shape (max_units, classes)
+        # Remove the leading batch dimension
+        # => shape (max_units, num_classes)
         at_logits = at_logits.squeeze(0)  # (max_units, 6)
         dx_logits = dx_logits.squeeze(0)  # (max_units, dx_range)
         dy_logits = dy_logits.squeeze(0)  # (max_units, dy_range)
 
-        # For each unit i in [0..max_units-1], pick argmax
-        action_types = at_logits.argmax(dim=1)  # (max_units,)
-        dx_idx = dx_logits.argmax(dim=1)       # (max_units,)
-        dy_idx = dy_logits.argmax(dim=1)       # (max_units,)
+    # Pick the best action type (0..5)
+    action_types = at_logits.argmax(dim=1)  # shape = (max_units,)
 
-    # Convert to actual integers
-    # Suppose we define a mapping for dx_idx => [-2..2], same for dy
-    # This is just an example: if dx_range=5, indices=0..4 => offsets [-2..2].
-    offset_min = -2
-    offset_max = 2
-    dx_values = dx_idx + offset_min  # shift from 0..4 -> -2..2
-    dy_values = dy_idx + offset_min  # same shift
+    # Pick the best dx, dy for sap. Suppose we interpret
+    # dx_idx in [0..(dx_range-1)] => an offset in [-2..2], for dx_range=5.
+    offset_min = -10
+    dx_idx = dx_logits.argmax(dim=1)  # shape = (max_units,)
+    dy_idx = dy_logits.argmax(dim=1)  # shape = (max_units,)
+    dx_values = dx_idx + offset_min
+    dy_values = dy_idx + offset_min
 
-    # Build final actions array
+    # Build the final (max_units, 3) actions
     actions = []
     for i in range(max_units):
-        a_type = int(action_types[i].item())  # 0..5
-        dx = int(dx_values[i].item())
-        dy = int(dy_values[i].item())
+        a_type = int(action_types[i].item())
+        # Only if action_type == 5 (sap), we use dx/dy
+        if a_type == 5:
+            dx = int(dx_values[i].item())
+            dy = int(dy_values[i].item())
+        else:
+            # Not a sap action => dx=dy=0
+            dx = 0
+            dy = 0
         actions.append([a_type, dx, dy])
 
-    actions = np.array(actions, dtype=int)  # shape (max_units, 3)
-    return actions
+    return np.array(actions, dtype=int)  # shape (max_units, 3)
 
 
 def select_action_dqn(agent_id: int, state: np.ndarray, max_units: int):
@@ -250,7 +289,7 @@ def select_action_dqn(agent_id: int, state: np.ndarray, max_units: int):
         # Generate a random array with shape (max_units, 3).
         # First column in range [0, 5], next two columns in range [-10, 10].
         random_col0 = np.random.randint(0, 6, size=(max_units, 1))     # shape (max_units, 1)
-        random_col12 = np.random.randint(-10, 11, size=(max_units, 2)) # shape (max_units, 2)
+        random_col12 = np.random.randint(-8, 9, size=(max_units, 2)) # shape (max_units, 2)
 
         random_actions = np.concatenate([random_col0, random_col12], axis=1)  # shape (max_units, 3)
         return random_actions
@@ -279,7 +318,7 @@ class DQNAgent1():
         self.input_size = self.obs_size + self.cfg_size
 
         # Initialize the global DQN model with the new input size
-        maybe_init_globals(1, self.input_size, self.action_size, self.max_units)
+        maybe_init_globals(1, self.input_size, self.max_units)
 
         self.last_obs = None
         self.last_action = None
@@ -351,7 +390,7 @@ class DQNAgent2():
         self.cfg_size = len(self.cfg_array)
         self.input_size = self.obs_size + self.cfg_size
 
-        maybe_init_globals(2, self.input_size, self.action_size, self.max_units)
+        maybe_init_globals(2, self.input_size, self.max_units)
 
         self.last_obs = None
         self.last_action = None
