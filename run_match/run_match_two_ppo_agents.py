@@ -132,25 +132,22 @@ class LuxAIS3GymEnvWrap(MultiAgentEnv):
         single_player_obs_space = spaces.Box(
             low=-1e9, high=-1e9, shape=self.single_obs_shape, dtype=np.float32
         )
-        self.observation_space = spaces.Dict(
-            {
-                "player_0": single_player_obs_space,
-                "player_1": single_player_obs_space,
-            }
+        self.observation_space = spaces.Box(
+            low=-1e9, high=1e9,
+            shape=self.single_obs_shape,  # (110,)
+            dtype=np.float32
         )
 
         # For the action space, you already have a Dict with keys "player_0" and "player_1".
         # Example from your code:
-        low = np.zeros((self.env_params.max_units, 3))
-        low[:, 1:] = -self.env_params.unit_sap_range
-        high = np.ones((self.env_params.max_units, 3)) * 6
-        high[:, 1:] = self.env_params.unit_sap_range
-        self.action_space = spaces.Dict(
-            dict(
-                player_0=spaces.Box(low=low, high=high, dtype=np.int16),
-                player_1=spaces.Box(low=low, high=high, dtype=np.int16),
-            )
+        # Example: single continuous vector of length max_units*3
+        self.action_space = spaces.Box(
+            low=-10,
+            high=10,
+            shape=(16*3,),
+            dtype=np.int16,
         )
+
 
     def render(self):
         # Just pass to underlying JAX env’s render
@@ -276,17 +273,18 @@ class LuxAIS3GymEnvWrap(MultiAgentEnv):
         # reward might be shape (2,) => we map it to { "player_0": reward[0], "player_1": reward[1] }
         # same with terminated, truncated.
         # If your underlying env is guaranteed 2 players, index them. If variable, adapt accordingly.
+        print(str(reward))
         rew_dict = {
-            "player_0": float(reward[0]),
-            "player_1": float(reward[1]),
+            "player_0": float(reward["player_0"]),
+            "player_1": float(reward["player_1"]),
         }
         term_dict = {
-            "player_0": bool(terminated[0]),
-            "player_1": bool(terminated[1]),
+            "player_0": bool(terminated["player_0"]),
+            "player_1": bool(terminated["player_1"]),
         }
         trunc_dict = {
-            "player_0": bool(truncated[0]),
-            "player_1": bool(truncated[1]),
+            "player_0": bool(truncated["player_0"]),
+            "player_1": bool(truncated["player_1"]),
         }
 
         return final_obs, rew_dict, term_dict, trunc_dict, info
