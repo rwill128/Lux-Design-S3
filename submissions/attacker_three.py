@@ -4,10 +4,6 @@ from argparse import Namespace
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
-# Constants
-NEBULA_TILE = 1  # Nebula tile type
-NEBULA_PENALTY = 50  # Cost penalty for nebula tiles outside relic areas
-
 
 class BestAgentAttacker:
     def __init__(self, player: str, env_cfg) -> None:
@@ -220,7 +216,7 @@ class BestAgentAttacker:
                 # Visible tile
                 if tile_type_map[x, y] == 2:  # Asteroid
                     return False
-                if tile_type_map[x, y] == NEBULA_TILE and not self.is_in_relic_5x5_area(x, y):  # Nebula outside relic area
+                if tile_type_map[x, y] == 1 and not self.is_in_relic_5x5_area(x, y):  # Nebula outside relic area
                     return False
                 return True
             else:
@@ -253,8 +249,8 @@ class BestAgentAttacker:
                     # Calculate the step cost using tile energy
                     tile_cost = 10 - tile_energy_map[nx, ny]
                     # Add nebula penalty if applicable
-                    if sensor_mask[nx, ny] and tile_type_map[nx, ny] == NEBULA_TILE and not self.is_in_relic_5x5_area(nx, ny):
-                        tile_cost += NEBULA_PENALTY
+                    if sensor_mask[nx, ny] and tile_type_map[nx, ny] == 1 and not self.is_in_relic_5x5_area(nx, ny):
+                        tile_cost += 50
                     # Floor at 0
                     if tile_cost < 0:
                         tile_cost = 0
@@ -441,8 +437,8 @@ class BestAgentAttacker:
                 dist = abs(ux - tx) + abs(uy - ty)
                 cost = dist
                 # Add nebula penalty if applicable
-                if obs["sensor_mask"][tx, ty] and obs["map_features"]["tile_type"][tx, ty] == NEBULA_TILE and not self.is_in_relic_5x5_area(tx, ty):
-                    cost += NEBULA_PENALTY
+                if obs["sensor_mask"][tx, ty] and obs["map_features"]["tile_type"][tx, ty] == 1 and not self.is_in_relic_5x5_area(tx, ty):
+                    cost += 50
                 # If desired, adjust cost based on known tiles:
                 if (tx, ty) in self.known_reward_tiles:
                     cost += REWARD_BONUS
@@ -514,8 +510,8 @@ class BestAgentAttacker:
                         dist = abs(ux - tx) + abs(uy - ty)
                         cost = dist
                         # Add nebula penalty if applicable
-                        if obs["sensor_mask"][tx, ty] and obs["map_features"]["tile_type"][tx, ty] == NEBULA_TILE and not self.is_in_relic_5x5_area(tx, ty):
-                            cost += NEBULA_PENALTY
+                        if obs["sensor_mask"][tx, ty] and obs["map_features"]["tile_type"][tx, ty] == 1 and not self.is_in_relic_5x5_area(tx, ty):
+                            cost += 50
                         if (tx, ty) in self.known_reward_tiles:
                             cost += REWARD_BONUS
                             if cost < 0:

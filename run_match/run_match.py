@@ -45,8 +45,6 @@ def evaluate_agents(agent_1_cls, agent_2_cls, seed=45, games_to_play=3, replay_s
                 game_done = True
             step += 1
 
-        player_0.act(step=step, obs=obs["player_0"])
-        player_1.act(step=step, obs=obs["player_1"])
 
     env.close()  # saves the replay of the last game and frees resources
     print(f"Finished {games_to_play} games. Replays saved to {replay_save_dir}")

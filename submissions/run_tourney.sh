@@ -8,8 +8,7 @@ OUTPUT_DIR="replays/run_$TIMESTAMP"
 mkdir -p "$OUTPUT_DIR"
 
 # Run the Lux AI tournament and save the replay
-luxai-s3 attacker_two.py \
-         attacker_different_deduce.py \
+luxai-s3 attacker_different_deduce.py \
          attacker_three.py \
          attacker_4.py \
          attacker_4_no_nebula.py \
