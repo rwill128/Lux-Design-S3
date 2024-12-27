@@ -1,0 +1,1 @@
+MAX_BOARD_SIZE = (24, 24)

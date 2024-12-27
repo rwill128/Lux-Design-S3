@@ -11,6 +11,10 @@ mkdir -p "$OUTPUT_DIR"
 luxai-s3 attacker_different_deduce.py \
          attacker_three.py \
          attacker_4.py \
+         attacker_4_collider.py \
+         attacker_4_no_shooting.py \
+         attacker_4_more_collisions.py \
+         attacker_4_more_collisions_no_shooting.py \
          attacker_4_no_nebula.py \
          attacker_4_explore5x5.py \
          normal_4_explore5x5.py \
@@ -24,8 +28,10 @@ luxai-s3 attacker_different_deduce.py \
          best_agent_no_nebula.py \
          best_agent_better_shooter.py \
          newest_agent/main.py \
+         newest_agent_no_sapping/main.py \
          best_agent/main.py \
          best_agent/best_agent2_explore5x5.py \
+         best_agent/best_agent2_explore5x5_no_attack.py \
         --tournament --output "$OUTPUT_DIR/replay.json" --tournament-cfg-max-episodes 5000 --tournament-cfg-concurrent 15
 
 echo "Replay saved to: $OUTPUT_DIR/replay.json"

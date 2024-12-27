@@ -1,5 +1,5 @@
 import ray
-from luxai_s3.wrappers import LuxAIS3GymEnv
+from luxai_s3.wrappers import LuxAIS3GymEnv, RecordEpisode
 
 from ray import tune
 from ray.rllib import MultiAgentEnv
@@ -300,26 +300,88 @@ class LuxAIS3GymEnvWrap(MultiAgentEnv):
         return final_obs, rew_dict, term_dict, trunc_dict, info
 
 
+def create_recording_env(env_config):
+    """
+    Returns a new environment each time it's called,
+    wrapped with RecordEpisode so that replays get saved.
+    """
+    # You can read env_config if you like, e.g. env_config.get("foo", default_val).
+    base_env = LuxAIS3GymEnvWrap(numpy_output=True)
+    # or use your multi-agent version if you have it
 
-gym_env = LuxAIS3GymEnvWrap(numpy_output=True)
-
+    # Wrap it to record episodes
+    wrapped_env = RecordEpisode(
+        base_env,
+        save_dir=env_config.get("save_dir", "replays"),
+        save_on_close=True,
+        save_on_reset=True
+    )
+    return wrapped_env
 
 def my_policy_mapping_fn(agent_id, episode=None, worker=None, **kwargs):
     return f"policy_{agent_id[-1]}"
+
+
+class RecordingEnvCreator(MultiAgentEnv):
+    def __init__(self, config=None):
+        if config is None:
+            config = {}
+        self.env = create_recording_env(config)
+        # The tricky part: We must forward the standard methods
+        # (observation_space, action_space, reset, step, etc.) from self.env.
+
+        self.observation_space = self.env.observation_space
+        self.action_space = self.env.action_space
+
+    def reset(self, *args, **kwargs):
+        return self.env.reset(*args, **kwargs)
+
+    def step(self, action):
+        return self.env.step(action)
+
+    def render(self, *args, **kwargs):
+        return self.env.render(*args, **kwargs)
+
+    def close(self):
+        return self.env.close()
+
 
 # Suppose your environment returns a dictionary of {agent_id: obs, ...} etc.
 # and can handle actions in a dict as well.
 config = (
     PPOConfig()
     .api_stack(enable_rl_module_and_learner=False, enable_env_runner_and_connector_v2=False)
-    .environment(env=LuxAIS3GymEnvWrap, env_config={"param_1": 123, "param_2": 456})
+    .environment(
+        env=RecordingEnvCreator,
+        env_config={
+            "save_dir": "replays_rllib",  # or any custom settings
+        }
+    )
     .framework("torch")
     .env_runners(num_env_runners=1)
     .training(model={"fcnet_hiddens": [128, 128]})
     .multi_agent(
         policies={
-            "policy_0": (None, gym_env.observation_space, gym_env.action_space, {}),
-            "policy_1": (None, gym_env.observation_space, gym_env.action_space, {}),
+            "policy_0": (None, spaces.Box(
+                low=-1e9, high=1e9,
+                shape=(110,),  # (110,)
+                dtype=np.float32
+            ), spaces.Box(
+                low=-10,
+                high=10,
+                shape=(16*3,),
+                dtype=np.int16,
+            ), {}),
+            "policy_1": (None, spaces.Box(
+                low=-1e9, high=1e9,
+                shape=(110,),  # (110,)
+                dtype=np.float32
+            ), spaces.Box(
+                low=-10,
+                high=10,
+                shape=(16*3,),
+                dtype=np.int16,
+            ), {}),
         },
         policy_mapping_fn=my_policy_mapping_fn,
     )

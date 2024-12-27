@@ -1,33 +1,29 @@
-import ray
-from luxai_s3.wrappers import LuxAIS3GymEnv
+import os
+import json
+import numpy as np
+import jax
+import flax
+import dataclasses
+import gymnasium as gym
+from gymnasium import spaces
+from typing import Any, SupportsFloat
 
+import ray
 from ray import tune
 from ray.rllib import MultiAgentEnv
 from ray.rllib.algorithms.ppo import PPOConfig
 
-ray.init()
-
-
-import json
-import os
-from typing import Any, SupportsFloat
-import dataclasses
-
-import flax
-import flax.serialization
-import gymnasium as gym
-import jax
-import numpy as np
-
-from gymnasium import spaces
+# Suppose these come from your own code:
+# - LuxAIS3Env: The JAX environment
+# - flatten_player_obs / flatten_config: flatten obs & config
+# - RecordEpisode: the wrapper that records episodes to JSON
 from luxai_s3.env import LuxAIS3Env
-from luxai_s3.params import EnvParams, env_params_ranges
-from luxai_s3.state import serialize_env_actions, serialize_env_states
 from luxai_s3.utils import to_numpy
+from luxai_s3.params import EnvParams, env_params_ranges
+from luxai_s3.wrappers import RecordEpisode  # your existing code
+# ^^^ Replace "your_flatten_helpers" with the actual file where you define them
 
-# ----------------------------------------------------------------------
-#  FLATTENING HELPER: EXACTLY LIKE YOUR "flatten_observation" EXAMPLE
-# ----------------------------------------------------------------------
+
 def flatten_player_obs(obs: dict, team_id: int, obs_size=100, cfg_array=None):
     """
     Flatten one player's portion of the structured observation into a shape (110,).
@@ -89,7 +85,6 @@ def flatten_player_obs(obs: dict, team_id: int, obs_size=100, cfg_array=None):
         # shape = obs_size + len(cfg_array)
         return np.concatenate([features, cfg_array]).astype(np.float32)
 
-
 def flatten_config(params_dict_kept: dict):
     """
     Turn the env_cfg dict into a fixed-size vector of length 10 (like your original example).
@@ -109,10 +104,13 @@ def flatten_config(params_dict_kept: dict):
 
 
 # ----------------------------------------------------------------------
-#  OUR ENV CLASS
+#  1) Base multi-agent environment that returns dict obs, etc.
 # ----------------------------------------------------------------------
 class LuxAIS3GymEnvWrap(MultiAgentEnv):
-    metadata = {"render_modes": ["human"]}
+    """
+    A multi-agent environment that calls a JAX-based LuxAIS3Env,
+    returning multi-agent style (obs_dict, rew_dict, terminated_dict, truncated_dict, info).
+    """
 
     def __init__(self, numpy_output: bool = False):
         super().__init__()
@@ -121,41 +119,26 @@ class LuxAIS3GymEnvWrap(MultiAgentEnv):
         self.jax_env = LuxAIS3Env(auto_reset=False)
         self.env_params: EnvParams = EnvParams()
 
-        # We'll define these to help with flattening
-        # You mentioned you typically do obs_size=100, plus 10 from config => 110
+        # We typically flatten obs to shape (110,):
         self.obs_size = 100
-        self.cfg_size = 10  # if you keep 10 param values
+        self.cfg_size = 10
         self.single_obs_shape = (self.obs_size + self.cfg_size,)  # => (110,)
 
-        # We want a multi-agent observation space (dict with 'player_0' and 'player_1')
-        # Each is a Box of shape (110,).
-        single_player_obs_space = spaces.Box(
-            low=-1e9, high=-1e9, shape=self.single_obs_shape, dtype=np.float32
-        )
+        # One Box(...) for a single agent's observation:
         self.observation_space = spaces.Box(
             low=-1e9, high=1e9,
             shape=self.single_obs_shape,  # (110,)
             dtype=np.float32
         )
 
-        # For the action space, you already have a Dict with keys "player_0" and "player_1".
-        # Example from your code:
-        # Example: single continuous vector of length max_units*3
+        # One Box(...) for a single agent's action. Suppose 16 units, each with 3 dims => shape=(48,).
         self.action_space = spaces.Box(
-            low=-10,
-            high=10,
-            shape=(16*3,),
+            low=-10, high=10,
+            shape=(16 * 3,),
             dtype=np.int16,
         )
 
-
-    def render(self):
-        # Just pass to underlying JAX env’s render
-        self.jax_env.render(self.state, self.env_params)
-
-    def reset(
-            self, *, seed: int | None = None, options: dict[str, Any] | None = None
-    ):
+    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
         if seed is not None:
             self.rng_key = jax.random.PRNGKey(seed)
         self.rng_key, reset_key = jax.random.split(self.rng_key)
@@ -171,13 +154,13 @@ class LuxAIS3GymEnvWrap(MultiAgentEnv):
             params = options["params"]
         self.env_params = params
 
-        # Reset the JAX env
         obs, self.state = self.jax_env.reset(reset_key, params=params)
 
         if self.numpy_output:
+            # Convert JAX arrays to numpy
             obs = to_numpy(flax.serialization.to_state_dict(obs))
 
-        # Keep only relevant params
+        # Flatten config
         params_dict = dataclasses.asdict(params)
         params_dict_kept = {
             k: params_dict[k]
@@ -196,26 +179,14 @@ class LuxAIS3GymEnvWrap(MultiAgentEnv):
         }
         cfg_array = flatten_config(params_dict_kept)  # shape=(10,)
 
-        # "obs" here is the dictionary from JAX with structure
-        #   obs["units"]["position"][2D array], obs["sensor_mask"], etc.
-        # We must produce two flattened obs: for player_0 and player_1.
-        # Let's assume T=2 for 2 teams, so:
-        #   flatten_player_obs(obs, team_id=0, obs_size=100, cfg_array=cfg_array)
-        #   flatten_player_obs(obs, team_id=1, obs_size=100, cfg_array=cfg_array)
-        # If your environment doesn't strictly do [team_id=0, team_id=1], adjust as needed.
-
-        obs_player_0 = flatten_player_obs(
-            obs, team_id=0, obs_size=self.obs_size, cfg_array=cfg_array
-        )
-        obs_player_1 = flatten_player_obs(
-            obs, team_id=1, obs_size=self.obs_size, cfg_array=cfg_array
-        )
+        # Flatten obs for each agent
+        obs_player_0 = flatten_player_obs(obs, team_id=0, obs_size=self.obs_size, cfg_array=cfg_array)
+        obs_player_1 = flatten_player_obs(obs, team_id=1, obs_size=self.obs_size, cfg_array=cfg_array)
 
         final_obs = {
             "player_0": obs_player_0,
             "player_1": obs_player_1,
         }
-
         info = {
             "params": params_dict_kept,
             "full_params": params_dict,
@@ -224,17 +195,14 @@ class LuxAIS3GymEnvWrap(MultiAgentEnv):
         return final_obs, info
 
     def step(
-            self, action: Any
-    ) -> tuple[dict, SupportsFloat, dict, dict, dict]:
+            self, action: dict
+    ) -> tuple[dict, dict, dict, dict, dict]:
         """
-        Must return: (obs, reward, terminated, truncated, info)
-         - obs: dict of obs for each agent
-         - reward: dict of float for each agent
-         - terminated: dict of bool for each agent
-         - truncated: dict of bool for each agent
-         - info: dict of extra info
+        Must return: (obs_dict, rew_dict, terminated_dict, truncated_dict, info_dict)
+        each keyed by agent plus '__all__' for done flags.
         """
         self.rng_key, step_key = jax.random.split(self.rng_key)
+        # action is e.g. {"player_0": np.array(48-dim), "player_1": np.array(48-dim)}
         obs, self.state, reward, terminated, truncated, info = self.jax_env.step(
             step_key, self.state, action, self.env_params
         )
@@ -244,91 +212,141 @@ class LuxAIS3GymEnvWrap(MultiAgentEnv):
             reward = to_numpy(reward)
             terminated = to_numpy(terminated)
             truncated = to_numpy(truncated)
-            # info = to_numpy(flax.serialization.to_state_dict(info)) # optional
 
-        # Flatten new observation for each agent
-        # We also must keep track of the same env_cfg array if needed. For simplicity,
-        # let's just store it in self.cfg_array from the last reset or from info, etc.
-        # Alternatively, we can do the same logic in reset (assuming env_params won't change).
+        # Possibly re-flatten config
         params_dict_kept = info.get("params", None)
         if params_dict_kept:
             cfg_array = flatten_config(params_dict_kept)
         else:
-            # fallback, or store it from last time
             cfg_array = np.zeros(self.cfg_size, dtype=np.float32)
 
-        obs_player_0 = flatten_player_obs(
-            obs, team_id=0, obs_size=self.obs_size, cfg_array=cfg_array
-        )
-        obs_player_1 = flatten_player_obs(
-            obs, team_id=1, obs_size=self.obs_size, cfg_array=cfg_array
-        )
+        # Flatten obs for each agent
+        obs_player_0 = flatten_player_obs(obs, team_id=0, obs_size=self.obs_size, cfg_array=cfg_array)
+        obs_player_1 = flatten_player_obs(obs, team_id=1, obs_size=self.obs_size, cfg_array=cfg_array)
         final_obs = {
             "player_0": obs_player_0,
             "player_1": obs_player_1,
         }
 
-        # Because this is multi-agent, we want to return dicts for reward/terminated/truncated.
-        # The JAX env might produce them as arrays or whatever shape. Let's convert:
-        # reward might be shape (2,) => we map it to { "player_0": reward[0], "player_1": reward[1] }
-        # same with terminated, truncated.
-        # If your underlying env is guaranteed 2 players, index them. If variable, adapt accordingly.
+        # Convert reward, done, truncated to dict
         rew_dict = {
             "player_0": float(reward["player_0"]),
             "player_1": float(reward["player_1"]),
         }
         term_dict = {
-            "__all__": bool(terminated["player_0"]) or bool(terminated["player_1"]),
             "player_0": bool(terminated["player_0"]),
             "player_1": bool(terminated["player_1"]),
+            "__all__": bool(terminated["player_0"]) or bool(terminated["player_1"]),
         }
         trunc_dict = {
-            "__all__": bool(truncated["player_0"]) or bool(truncated["player_1"]),
             "player_0": bool(truncated["player_0"]),
             "player_1": bool(truncated["player_1"]),
+            "__all__": bool(truncated["player_0"]) or bool(truncated["player_1"]),
         }
 
+        # Remove any extra keys from info that RLlib doesn't like:
         common_dict = {}
         for k in ["discount", "final_observation", "final_state"]:
             if k in info:
                 common_dict[k] = info.pop(k)
-
-        # RLlib allows "info['__common__']"
         if common_dict:
             info["__common__"] = common_dict
 
         return final_obs, rew_dict, term_dict, trunc_dict, info
 
+    def render(self):
+        # Optional
+        self.jax_env.render(self.state, self.env_params)
+
+    def close(self):
+        pass
 
 
-gym_env = LuxAIS3GymEnvWrap(numpy_output=True)
+# ----------------------------------------------------------------------
+#  2) "RecordingLuxEnv" class that wraps the above in RecordEpisode
+# ----------------------------------------------------------------------
+class RecordingLuxEnv(MultiAgentEnv):
+    """
+    This environment *wraps* LuxAIS3GymEnvWrap with RecordEpisode,
+    so that every episode is saved to JSON in `save_dir`.
+    """
 
+    def __init__(self, config=None):
+        super().__init__()
+        if config is None:
+            config = {}
+        save_dir = config.get("save_dir", "replays_rllib")
+
+        # 1) Create the base multi-agent env
+        base_env = LuxAIS3GymEnvWrap(numpy_output=True)
+
+        # 2) Wrap it to record episodes
+        self.env = RecordEpisode(
+            env=base_env,
+            save_dir=save_dir,
+            save_on_close=True,
+            save_on_reset=True,
+        )
+
+        # Expose observation_space/action_space as single-agent definitions
+        # (Same for "player_0" and "player_1" in multi-agent).
+        self.observation_space = base_env.observation_space
+        self.action_space = base_env.action_space
+
+    def reset(self, *, seed=None, options=None):
+        obs, info = self.env.reset(seed=seed, options=options)
+        return obs, info
+
+    def step(self, action):
+        obs, rew, term, trunc, info = self.env.step(action)
+        return obs, rew, term, trunc, info
+
+    def render(self):
+        return self.env.render()
+
+    def close(self):
+        return self.env.close()
+
+# ----------------------------------------------------------------------
+#  3) RLlib Training Config
+# ----------------------------------------------------------------------
 
 def my_policy_mapping_fn(agent_id, episode=None, worker=None, **kwargs):
+    # For 2 teams => "player_0" => policy_0, "player_1" => policy_1
     return f"policy_{agent_id[-1]}"
 
-# Suppose your environment returns a dictionary of {agent_id: obs, ...} etc.
-# and can handle actions in a dict as well.
+# We'll define each policy's obs/action space as 110-dim obs, 48-dim actions
+obs_space = spaces.Box(low=-1e9, high=1e9, shape=(110,), dtype=np.float32)
+act_space = spaces.Box(low=-10, high=10, shape=(16*3,), dtype=np.int16)
+
 config = (
     PPOConfig()
+    # Use the old API stack
     .api_stack(enable_rl_module_and_learner=False, enable_env_runner_and_connector_v2=False)
-    .environment(env=LuxAIS3GymEnvWrap, env_config={"param_1": 123, "param_2": 456})
+    .environment(
+        env=RecordingLuxEnv,  # the class
+        env_config={"save_dir": "replays_rllib"}  # pass the directory
+    )
     .framework("torch")
-    .env_runners(num_env_runners=1)
-    .training(model={"fcnet_hiddens": [128, 128]})
+    .env_runners(num_env_runners=1)  # number of rollout workers
+    .training(
+        model={"fcnet_hiddens": [128, 128]}  # old API stack setting
+    )
     .multi_agent(
         policies={
-            "policy_0": (None, gym_env.observation_space, gym_env.action_space, {}),
-            "policy_1": (None, gym_env.observation_space, gym_env.action_space, {}),
+            "policy_0": (None, obs_space, act_space, {}),
+            "policy_1": (None, obs_space, act_space, {}),
         },
         policy_mapping_fn=my_policy_mapping_fn,
     )
     .resources(num_gpus=0)
 )
 
-tune.run(
-    "PPO",
-    config=config.to_dict(),
-    stop={"timesteps_total": 1_000_000},
-    storage_path="/home/rick/IdeaProjects/Lux-Design-S3/run_match/rllib_logs"
-)
+if __name__ == "__main__":
+    ray.init()
+    tune.run(
+        "PPO",
+        config=config.to_dict(),
+        stop={"timesteps_total": 1_000_000},
+        storage_path="/home/rick/IdeaProjects/Lux-Design-S3/run_match/rllib_logs"
+    )
