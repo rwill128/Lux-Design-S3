@@ -1,0 +1,29 @@
+{
+  "TILE_TYPES": {
+    "EMPTY": 0,
+    "NEBULA": 1,
+    "ASTEROID": 2
+  },
+  "DIRECTIONS": {
+    "NORTH": 1,
+    "WEST": 4,
+    "EAST": 3,
+    "SOUTH": 2,
+    "CENTER": 5
+  },
+  "PARAMETERS": {
+    "MAX_STEPS_IN_MATCH": 100,
+    "MATCH_COUNT_PER_EPISODE": 5,
+    "MAX_UNITS": 16,
+    "INIT_UNIT_ENERGY": 100,
+    "MAX_UNIT_ENERGY": 400,
+    "SPAWN_RATE": 3,
+    "UNIT_SAP_COST": 10,
+    "UNIT_SAP_RANGE": 4,
+    "UNIT_SAP_DROPOFF_FACTOR": 0.5,
+    "UNIT_SAP_VOID_FACTOR": 0.125,
+    "UNIT_SENSOR_RANGE": 2,
+    "NEBULA_TILE_ENERGY_REDUCTION": 1,
+    "UNIT_MOVE_COST": 2
+  }
+}

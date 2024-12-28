@@ -6,6 +6,7 @@ class Constants:
         TEAM_ENERGY = "te"
         RELIC_LOCATIONS = "rl"
         UNITS = "u"
+        UNIT_ENERGY = "ue"
         ENERGY_MAP = "e"
         NEBULA_MAP = "nm"
         ASTEROID_MAP = "am"
@@ -17,7 +18,7 @@ class Constants:
         WEST = 4
         SOUTH = 3
         EAST = 2
-        CENTER = 5
+        CENTER = 0
 
         @staticmethod
         def astuple(include_center: bool):
