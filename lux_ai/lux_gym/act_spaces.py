@@ -273,9 +273,8 @@ class BasicActionSpace(BaseActSpace):
 
     def get_available_actions_mask(
             self,
-            game_state: Game,
-            board_dims: Tuple[int, int],
-            pos_to_unit_dict: Dict[Tuple, Optional[Unit]],
+            obs,
+            player_name
     ) -> Dict[str, np.ndarray]:
         """
         Compute a boolean mask that indicates which actions are valid for each cell, for each player, for each
@@ -294,7 +293,9 @@ class BasicActionSpace(BaseActSpace):
             for key, space in self.get_action_space(board_dims).spaces.items()
         }
 
-        for player in game_state.players:
+        for player in obs.keys():
+            player_data = obs[player]
+
             p_id = player.team
 
             # Check each unit

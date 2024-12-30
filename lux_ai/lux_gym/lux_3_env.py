@@ -97,53 +97,47 @@ class Lux3Env(gym.Env):
 
         obs, info = self._real_game_env.reset(seed=self.get_seed())
 
+        self.obs = obs
         self.env_config = info["params"]
 
 
 
-    def reset(self, observation_updates: Optional[List[str]] = None) -> Tuple[Game, Tuple[float, float], bool, Dict]:
+    def reset(self) -> Tuple[Game, Tuple[float, float], bool, Dict]:
 
         self.configuration["seed"] = self.get_seed() + 1
         self._real_game_env = LuxAIS3GymEnv(numpy_output=True)
         obs, info = self._real_game_env.reset(seed=self.get_seed())
+
+        self.obs = obs
         self.env_config = info["params"]
-
-        self.game_state._initialize(obs, self.env_config)
-        self.game_state._update(obs)
-
 
         self.done = False
         self.board_dims = (24, 24)
         self.observation_space = self.obs_space.get_obs_spec(self.board_dims)
-        self.info = {
-            "actions_taken": {
-                key: np.zeros(space.shape + (len(ACTION_MEANINGS[key]),), dtype=bool)
-                for key, space in self.action_space.get_action_space(self.board_dims).spaces.items()
-            },
-            "available_actions_mask": {
-                key: np.ones(space.shape + (len(ACTION_MEANINGS[key]),), dtype=bool)
-                for key, space in self.action_space.get_action_space(self.board_dims).spaces.items()
-            }
-        }
-        self._update_internal_state()
+        self.info = {"actions_taken": {
+            key: np.zeros(space.shape + (len(ACTION_MEANINGS[key]),), dtype=bool)
+            for key, space in self.action_space.get_action_space(self.board_dims).spaces.items()
+        }, "available_actions_mask": self.action_space.get_available_actions_mask(
+            self.obs,
+        )}
 
         return self.get_obs_reward_done_info()
 
     def step(self, action: Dict[str, np.ndarray]) -> Tuple[Game, Tuple[float, float], bool, Dict]:
-        if self.run_game_automatically:
-            actions_processed, actions_taken = self.process_actions(action)
-            self._step(actions_processed)
-            self.info["actions_taken"] = actions_taken
-        self._update_internal_state()
-
-        return self.get_obs_reward_done_info()
+        actions_processed, actions_taken = self.process_actions(action)
+        obs, reward, terminated, truncated, info = self._real_game_env.step(actions_processed)
+        self.info["actions_taken"] = actions_taken
+        self.info["available_actions_mask"] = self.action_space.get_available_actions_mask(
+            self.obs
+        )
+        return self.get_obs_reward_done_info(obs, reward, terminated, truncated, info)
 
     def manual_step(self, observation_updates: List[str]) -> NoReturn:
         assert not self.run_game_automatically
         self.game_state._update(observation_updates)
 
-    def get_obs_reward_done_info(self) -> Tuple[Game, Tuple[float, float], bool, Dict]:
-        rewards = self.default_reward_space.compute_rewards(game_state=self.game_state, done=self.done)
+    def get_obs_reward_done_info(self, obs, reward, terminated, truncated, info) -> Tuple[Game, Tuple[float, float], bool, Dict]:
+        rewards = self.default_reward_space.compute_rewards(game_state=obs, done=terminated or truncated)
         return self.game_state, rewards, self.done, copy.copy(self.info)
 
     def process_actions(self, action: Dict[str, np.ndarray]) -> Tuple[List[List[str]], Dict[str, np.ndarray]]:
@@ -170,13 +164,11 @@ class Lux3Env(gym.Env):
         self.done = terminated or truncated
 
     def _update_internal_state(self) -> NoReturn:
-        self.pos_to_unit_dict = _generate_pos_to_unit_dict(self.game_state)
+        # self.pos_to_unit_dict = _generate_pos_to_unit_dict(self.game_state)
         self.info["available_actions_mask"] = self.action_space.get_available_actions_mask(
-            self.game_state,
-            self.board_dims,
-            self.pos_to_unit_dict,
-            self.pos_to_city_tile_dict
+            self.obs,
         )
+        return
 
     def seed(self, seed: Optional[int] = None) -> NoReturn:
         if seed is not None:
