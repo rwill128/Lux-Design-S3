@@ -9,10 +9,9 @@ class TileType:
         self.type = r_type
 
 class Cell:
-    def __init__(self, x, y, t: TILE_TYPES, energy: int):
+    def __init__(self, x, y, t: TILE_TYPES):
         self.pos = Position(x, y)
         self.tile_type = TileType(t)
-        self.energy = energy
 
     def is_empty(self):
         return self.tile_type == 0

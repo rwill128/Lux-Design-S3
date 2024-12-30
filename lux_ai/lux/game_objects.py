@@ -2,10 +2,8 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from .constants import Constants
 from .game_map import Position
 from .game_constants import GAME_CONSTANTS
-
 
 
 class Player:
@@ -55,7 +53,7 @@ class Unit:
         """
         return the command to move unit in the given direction
         """
-        return [dir, 0, 0]
+        return [int(dir), 0, 0]
 
     # TODO: Maybe this is where I return an array with coordinates for the closest enemy?
     #   at least a first draft

@@ -13,8 +13,9 @@ import sys
 from threading import Thread
 from typing import Any, Dict, List, NoReturn, Optional, Tuple
 
+from src.luxai_s3.wrappers import LuxAIS3GymEnv
 from ..lux.game import Game
-from ..lux.game_objects import Unit, CityTile
+from ..lux.game_objects import Unit
 from ..lux_gym.act_spaces import BaseActSpace, ACTION_MEANINGS
 from ..lux_gym.obs_spaces import BaseObsSpace
 from ..lux_gym.reward_spaces import GameResultReward
@@ -51,16 +52,6 @@ def _generate_pos_to_unit_dict(game_state: Game) -> Dict[Tuple, Optional[Unit]]:
     return pos_to_unit_dict
 
 
-def _generate_pos_to_city_tile_dict(game_state: Game) -> Dict[Tuple, Optional[CityTile]]:
-    pos_to_city_tile_dict = {(cell.pos.x, cell.pos.y): None for cell in itertools.chain(*game_state.map.map)}
-    for player in game_state.players:
-        for city in player.cities.values():
-            for city_tile in city.citytiles:
-                pos_to_city_tile_dict[(city_tile.pos.x, city_tile.pos.y)] = city_tile
-
-    return pos_to_city_tile_dict
-
-
 # noinspection PyProtectedMember
 class Lux3Env(gym.Env):
     metadata = {"render.modes": []}
@@ -87,7 +78,7 @@ class Lux3Env(gym.Env):
         if configuration is not None:
             self.configuration = configuration
         else:
-            self.configuration = make("lux_ai_2021").configuration
+            self.configuration = make("lux_ai_s3").configuration
             # 2: warnings, 1: errors, 0: none
             self.configuration["loglevel"] = 0
         if seed is not None:
@@ -97,61 +88,32 @@ class Lux3Env(gym.Env):
         self.done = False
         self.info = {}
         self.pos_to_unit_dict = dict()
-        self.pos_to_city_tile_dict = dict()
         self.reset_count = 0
 
-        self._dimension_process = None
+        self._real_game_env = None
         self._q = None
         self._t = None
-        self._restart_dimension_process()
+        self._real_game_env = LuxAIS3GymEnv(numpy_output=True)
 
-    def _restart_dimension_process(self) -> NoReturn:
-        if self._dimension_process is not None:
-            self._dimension_process.kill()
-        if self.run_game_automatically:
-            # 1.1: Initialize dimensions in the background
-            self._dimension_process = Popen(
-                ["node", str(Path(DIR_PATH) / "dimensions/main.js")],
-                stdin=PIPE,
-                stdout=PIPE,
-                stderr=PIPE
-            )
-            self._q = Queue()
-            self._t = Thread(target=_enqueue_output, args=(self._dimension_process.stdout, self._q))
-            self._t.daemon = True
-            self._t.start()
-            # atexit.register(_cleanup_dimensions_factory(self._dimension_process))
+        obs, info = self._real_game_env.reset(seed=self.get_seed())
+
+        self.env_config = info["params"]
+
+
 
     def reset(self, observation_updates: Optional[List[str]] = None) -> Tuple[Game, Tuple[float, float], bool, Dict]:
-        self.game_state = Game()
-        self.reset_count = (self.reset_count + 1) % self.restart_subproc_after_n_resets
-        # There seems to be a gradual memory leak somewhere, so we restart the dimension process every once in a while
-        if self.reset_count == 0:
-            self._restart_dimension_process()
-        if self.run_game_automatically:
-            assert observation_updates is None, "Game is being run automatically"
-            # 1.2: Initialize a blank state game if new episode is starting
-            self.configuration["seed"] += 1
-            initiate = {
-                "type": "start",
-                "agent_names": [],  # unsure if this is provided?
-                "config": self.configuration
-            }
-            self._dimension_process.stdin.write((json.dumps(initiate) + "\n").encode())
-            self._dimension_process.stdin.flush()
-            agent1res = json.loads(self._dimension_process.stderr.readline())
-            # Skip agent2res and match_obs_meta
-            _ = self._dimension_process.stderr.readline(), self._dimension_process.stderr.readline()
 
-            self.game_state._initialize(agent1res)
-            self.game_state._update(agent1res[2:])
-        else:
-            assert observation_updates is not None, "Game is not being run automatically"
-            self.game_state._initialize(observation_updates)
-            self.game_state._update(observation_updates[2:])
+        self.configuration["seed"] = self.get_seed() + 1
+        self._real_game_env = LuxAIS3GymEnv(numpy_output=True)
+        obs, info = self._real_game_env.reset(seed=self.get_seed())
+        self.env_config = info["params"]
+
+        self.game_state._initialize(obs, self.env_config)
+        self.game_state._update(obs)
+
 
         self.done = False
-        self.board_dims = (self.game_state.map_width, self.game_state.map_height)
+        self.board_dims = (24, 24)
         self.observation_space = self.obs_space.get_obs_spec(self.board_dims)
         self.info = {
             "actions_taken": {
@@ -192,38 +154,23 @@ class Lux3Env(gym.Env):
             self.pos_to_unit_dict
         )
 
-    def _step(self, action: List[List[str]]) -> NoReturn:
+    def _step(self, action_player_one: List[List[str]], action_player_two) -> NoReturn:
         # 2.: Pass in actions (json representation along with id of who made that action),
         #       and agent information (id, status) to dimensions via stdin
-        assert len(action) == 2
-        # TODO: Does dimension process state need to include info other than actions?
-        state = [{'action': a} for a in action]
-        self._dimension_process.stdin.write((json.dumps(state) + "\n").encode())
-        self._dimension_process.stdin.flush()
+        actions = {
+            "player_0": action_player_one,
+            "player_1": action_player_two,
+        }
 
+        obs, reward, terminated, truncated, info = self._real_game_env.step(actions)
         # 3.1 : Receive and parse the observations returned by dimensions via stdout
-        agent1res = json.loads(self._dimension_process.stderr.readline())
-        # Skip agent2res and match_obs_meta
-        _ = self._dimension_process.stderr.readline(), self._dimension_process.stderr.readline()
-        self.game_state._update(agent1res)
+        self.game_state._update(obs)
 
         # Check if done
-        match_status = json.loads(self._dimension_process.stderr.readline())
-        self.done = match_status["status"] == "finished"
-
-        while True:
-            try:
-                line = self._q.get_nowait()
-            except Empty:
-                # no standard error received, break
-                break
-            else:
-                # standard error output received, print it out
-                print(line.decode(), file=sys.stderr, end='')
+        self.done = terminated or truncated
 
     def _update_internal_state(self) -> NoReturn:
         self.pos_to_unit_dict = _generate_pos_to_unit_dict(self.game_state)
-        self.pos_to_city_tile_dict = _generate_pos_to_city_tile_dict(self.game_state)
         self.info["available_actions_mask"] = self.action_space.get_available_actions_mask(
             self.game_state,
             self.board_dims,
@@ -234,7 +181,7 @@ class Lux3Env(gym.Env):
     def seed(self, seed: Optional[int] = None) -> NoReturn:
         if seed is not None:
             # Seed is incremented on reset()
-            self.configuration["seed"] = seed - 1
+            self.configuration["seed"] = seed + 1
         else:
             self.configuration["seed"] = math.floor(random.random() * 1e9)
 

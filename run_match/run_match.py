@@ -1,4 +1,5 @@
 import os
+import pickle
 from collections import defaultdict
 
 from luxai_s3.wrappers import LuxAIS3GymEnv, RecordEpisode
@@ -9,6 +10,23 @@ from scipy.optimize import linear_sum_assignment
 from submissions.attacker_4 import BestAgentAttacker4
 from submissions.attacker_4_collider import BestAgentAttacker4NoCollide
 from submissions.best_higher_energy import BestAgentHigherEnergy
+
+
+def save_obs(obs, filename="obs.pkl"):
+    """
+    Save the entire observation dict (with all array values printed) to a pickle file.
+    Also turn off print truncation for debugging prints.
+    """
+    # Turn off the default truncation in printing:
+    np.set_printoptions(threshold=np.inf)
+
+    # (Optional) If you just want to print the entire array in the console right now:
+    # print(obs)
+
+    # Now pickle and store the full data
+    with open(filename, "wb") as f:
+        pickle.dump(obs, f, protocol=pickle.HIGHEST_PROTOCOL)
+    print(f"Saved obs to {filename}")
 
 
 def evaluate_agents(agent_1_cls, agent_2_cls, seed=45, games_to_play=3, replay_save_dir="replays"):
@@ -39,7 +57,16 @@ def evaluate_agents(agent_1_cls, agent_2_cls, seed=45, games_to_play=3, replay_s
                 "player_1": player_1.act(step=step, obs=obs["player_1"]),
             }
 
+            # save_obs(actions, "actions.pkl")
+
+            # print("Sending actions: " + str(actions))
+
             obs, reward, terminated, truncated, info = env.step(actions)
+
+            # print("Received state: " + str(obs))
+            if step == 14:
+                save_obs(obs, "observations.pkl")
+
             dones = {k: terminated[k] or truncated[k] for k in terminated}
             if dones["player_0"] or dones["player_1"]:
                 game_done = True
@@ -52,7 +79,7 @@ def evaluate_agents(agent_1_cls, agent_2_cls, seed=45, games_to_play=3, replay_s
 
 if __name__ == "__main__":
     # Run evaluation with the dummy Agent against itself
-    evaluate_agents(BestAgentAttacker4, BestAgentAttacker4NoCollide, games_to_play=20, seed=2,
+    evaluate_agents(BestAgentAttacker4, BestAgentAttacker4NoCollide, games_to_play=1, seed=3,
                     replay_save_dir="replays/" + BestAgentAttacker4.__name__ + "_" + BestAgentAttacker4NoCollide.__name__)
 
     # After running, you can check the "replays" directory for saved replay files.

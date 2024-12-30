@@ -1,95 +1,64 @@
+import logging
+
 from .constants import Constants
 from .game_map import GameMap
-from .game_objects import Player, Unit, City
+from .game_objects import Player, Unit
 
 INPUT_CONSTANTS = Constants.INPUT_CONSTANTS
 GAME_LENGTH = 100
 
 
 class Game:
-    def _initialize(self, messages):
+    def _initialize(self, obs, env_cfg):
         """
         initialize state
         """
-        self.id = int(messages[0])
         self.turn = -1
         # get some other necessary initial input
-        map_info = messages[1].split(" ")
-        self.map_width = int(map_info[0])
-        self.map_height = int(map_info[1])
+        self.map_width = env_cfg["map_width"]
+        self.map_height = env_cfg["map_height"]
         self.map = GameMap(self.map_width, self.map_height)
         self.players = [Player(0), Player(1)]
 
-    @staticmethod
-    def _end_turn():
-        print("D_FINISH")
 
     def _reset_player_states(self):
         self.players[0].units = []
-        self.players[0].cities = {}
-        self.players[0].city_tile_count = 0
+        self.players[0].relic_points = 0
         self.players[1].units = []
-        self.players[1].cities = {}
-        self.players[1].city_tile_count = 0
+        self.players[1].relic_points = 0
 
     # noinspection PyProtectedMember
-    def _update(self, messages):
+    def _update(self, obs):
         """
-        update state
+        Process turn update messages to refresh the game state.
+
+        Args:
+            messages (list[str]): List of update messages from the game engine describing
+                                the current state of resources, units, cities, etc.
+
+        Updates:
+        - Players' relic points
+        - Unit locations
+        - Unit / player energy levels
+        - Nebula locations
+        - Asteroid locations
+        - Energy grid
+
+        The update process continues until a "D_DONE" message is received, indicating
+        all state updates for the current turn have been processed.
         """
+
         self.map = GameMap(self.map_width, self.map_height)
         self.turn += 1
         self._reset_player_states()
 
-        skip = getattr(self, "skip", None)
+        # TODO: This is what will take new obs and update the game state.
+        #  We can keep the last X number of these if we want as some kind of memory,
+        #  but better to have a NN structure that has recurrent or LSTM capabilities
 
-        for update in messages:
-            if update == "D_DONE":
-                break
-            strs = update.split(" ")
-            input_identifier = strs[0]
-            if input_identifier == INPUT_CONSTANTS.RESEARCH_POINTS:
-                team = int(strs[1])
-                self.players[team].research_points = int(strs[2])
-            elif input_identifier == INPUT_CONSTANTS.RESOURCES:
-                r_type = strs[1]
-                x = int(strs[2])
-                y = int(strs[3])
-                amt = int(float(strs[4]))
-                if (x, y) != skip:
-                    self.map._setResource(r_type, x, y, amt)
-            elif input_identifier == INPUT_CONSTANTS.UNITS:
-                unittype = int(strs[1])
-                team = int(strs[2])
-                unitid = strs[3]
-                x = int(strs[4])
-                y = int(strs[5])
-                cooldown = float(strs[6])
-                wood = int(strs[7])
-                coal = int(strs[8])
-                uranium = int(strs[9])
-                if (x, y) != skip:
-                    self.players[team].units.append(Unit(team, unittype, unitid, x, y, cooldown, wood, coal, uranium))
-            elif input_identifier == INPUT_CONSTANTS.CITY:
-                team = int(strs[1])
-                cityid = strs[2]
-                fuel = float(strs[3])
-                lightupkeep = float(strs[4])
-                self.players[team].cities[cityid] = City(team, cityid, fuel, lightupkeep)
-            elif input_identifier == INPUT_CONSTANTS.CITY_TILES:
-                team = int(strs[1])
-                cityid = strs[2]
-                x = int(strs[3])
-                y = int(strs[4])
-                cooldown = float(strs[5])
-                city = self.players[team].cities[cityid]
-                if (x, y) != skip:
-                    citytile = city._add_city_tile(x, y, cooldown)
-                    self.map.get_cell(x, y).citytile = citytile
-                    self.players[team].city_tile_count += 1
-            elif input_identifier == INPUT_CONSTANTS.ROADS:
-                x = int(strs[1])
-                y = int(strs[2])
-                road = float(strs[3])
-                if (x, y) != skip:
-                    self.map.get_cell(x, y).road = road
+        # TODO: This should take an obs I guess? And update all our known info. We'll also have to deal with keeping
+        #  a queue of the last X game states so that our NN can have some kind of memory. As a rudimentary approach
+
+        # Take observations and parse them into a Game, Game Map, Units, and Cells?
+        #  I'm not sure this is needed actually.
+        # If it is done, we have to have separate games and game maps for each player because of the hidden information

@@ -10,6 +10,8 @@ from lux_ai.lux.game import Game
 from lux_ai.lux.game_objects import Unit
 from lux_ai.utility_constants import MAX_BOARD_SIZE
 
+MAX_OVERLAPPING_ACTIONS = 4
+
 ACTION_MEANINGS = {
     "unit": [
         "NO-OP",
@@ -26,16 +28,13 @@ for u in ["unit"]:
         ACTION_MEANINGS[u].append(f"MOVE_{d}")
 
 
-ACTION_MEANINGS["unit"].extend(["SAP"])
-
-
 def _move_unit(action_meaning: str) -> Callable[[Unit], str]:
     """
     Create and return a function that moves a unit in the specified direction.
     The direction is parsed from the action_meaning string (e.g., 'MOVE_N' -> 'N').
     """
     direction = action_meaning.split("_")[1]
-    if direction not in DIRECTIONS:
+    if int(direction) not in DIRECTIONS:
         raise ValueError(f"Unrecognized direction '{direction}' in action_meaning '{action_meaning}'")
 
     def _move_func(unit: Unit) -> str:
@@ -51,7 +50,7 @@ def _no_op(game_object: Union[Unit]) -> Optional[str]:
     """
     return None
 
-def _sap(unit: Unit, pos_to_unit_dict: Dict[Tuple, Optional[Unit]]) -> str:
+def _sap(unit: Unit) -> str:
     """
     Use the worker's built-in method to sap (destroy a road to gain resources).
     Returns a command string recognized by the game engine.
@@ -65,16 +64,27 @@ def _sap(unit: Unit, pos_to_unit_dict: Dict[Tuple, Optional[Unit]]) -> str:
 ACTION_MEANING_TO_FUNC = {
     "unit": {
         "NO-OP": _no_op,
-        "SAP": _sap,
+        # "SAP": _sap,
     },
 }
 
+# TODO: This is where I should actions for sapping every square within sapping distance
+# TODO: Then should I mask them based on whether there's enemies there? Or at least mask them based on whether that unit has
+#  sufficient energy?
 # For each direction and resource, we add the appropriate function (move or transfer) to
 # both worker and cart. We do this after the dictionary is initially constructed.
-for u in ["worker", "cart"]:
+for u in ["unit"]:
     for d in DIRECTIONS:
         a = f"MOVE_{d}"
         ACTION_MEANING_TO_FUNC[u][a] = _move_unit(a)
+
+
+# Create a dictionary mapping each actor type and action string to a unique index.
+ACTION_MEANINGS_TO_IDX = {
+    actor: {
+        action: idx for idx, action in enumerate(actions)
+    } for actor, actions in ACTION_MEANINGS.items()
+}
 
 
 def get_unit_action(unit: Unit, action_idx: int, pos_to_unit_dict: Dict[Tuple, Optional[Unit]]) -> Optional[str]:
@@ -103,7 +113,7 @@ class BaseActSpace(ABC):
     """
 
     @abstractmethod
-    def get_action_space(self, board_dims: Tuple[int, int] = MAX_BOARD_SIZE) -> gym.spaces.Dict:
+    def get_action_space(self, board_dims: Tuple[int, int] = 24) -> gym.spaces.Dict:
         pass
 
     @abstractmethod
@@ -167,7 +177,7 @@ class BasicActionSpace(BaseActSpace):
         self.default_board_dims = MAX_BOARD_SIZE if default_board_dims is None else default_board_dims
 
     @lru_cache(maxsize=None)
-    def get_action_space(self, board_dims: Optional[Tuple[int, int]] = None) -> gym.spaces.Dict:
+    def get_action_space(self, board_dims: Optional[Tuple[int, int]] = 24) -> gym.spaces.Dict:
         """
         Returns a dictionary containing the discrete action spaces for "worker", "cart", and "city_tile".
         The shape is (1, number_of_players, x, y), and the discrete dimension is the length of the action list
@@ -181,10 +191,7 @@ class BasicActionSpace(BaseActSpace):
         p = 2
 
         spaces_dict = gym.spaces.Dict(
-            {"worker": gym.spaces.MultiDiscrete(np.zeros((1, p, x, y), dtype=int) + len(ACTION_MEANINGS["worker"])),
-             "cart": gym.spaces.MultiDiscrete(np.zeros((1, p, x, y), dtype=int) + len(ACTION_MEANINGS["cart"])),
-             "city_tile": gym.spaces.MultiDiscrete(
-                 np.zeros((1, p, x, y), dtype=int) + len(ACTION_MEANINGS["city_tile"])), })
+            {"unit": gym.spaces.MultiDiscrete(np.zeros((1, p, x, y), dtype=int) + len(ACTION_MEANINGS["unit"])) } )
 
         return spaces_dict
 
@@ -211,7 +218,7 @@ class BasicActionSpace(BaseActSpace):
     ) -> Tuple[List[List[str]], Dict[str, np.ndarray]]:
         """
         1. Iterate over all players.
-        2. For each player's units (worker, cart), get the action index from the action_tensors_dict.
+        2. For each player's units get the action index from the action_tensors_dict.
         3. Convert it to a command string using get_unit_action(...).
         4. Respect MAX_OVERLAPPING_ACTIONS so that no more than 4 non-NO-OP actions can occur on the same tile.
         5. For city tiles, do something similar, but there's no overlap limit for city tiles.
@@ -219,7 +226,7 @@ class BasicActionSpace(BaseActSpace):
         """
 
         # Initialize a container that collects the commands (strings) to be executed by each player.
-        action_strs = [[], []]
+        action_arrays = [[], []]
 
         # Create a boolean array that marks which actions are taken. This uses the expanded shape.
         actions_taken = {
@@ -232,76 +239,43 @@ class BasicActionSpace(BaseActSpace):
             # These arrays track how many actions have already been selected by overlapping units of the same type.
             # For example, if two workers are on the same cell, the second worker's action is stored at index=1 in
             # the 5D array.
-            worker_actions_taken_count = np.zeros(board_dims, dtype=int)
-            cart_actions_taken_count = np.zeros_like(worker_actions_taken_count)
+            actions_taken_count = np.zeros(board_dims, dtype=int)
 
             # Process units
             for unit in player.units:
                 if unit.can_act():
                     x, y = unit.pos.x, unit.pos.y
-                    if unit.is_worker():
-                        unit_type = "worker"
-                        actions_taken_count = worker_actions_taken_count
-                    elif unit.is_cart():
-                        unit_type = "cart"
-                        actions_taken_count = cart_actions_taken_count
-                    else:
-                        raise NotImplementedError(f'New unit type: {unit}')
+                    unit_type = "unit"
 
-                    # This 'actor_count' is effectively the index for which plane in the action tensor
-                    # is used for this particular overlapping unit.
+                    # Action plane is selected for stacked units
                     actor_count = actions_taken_count[x, y]
-
-
-                    # Retrieve the chosen action index from the precomputed action_tensors_dict.
-                    action_idx = action_tensors_dict[unit_type][0, p_id, x, y, actor_count]
-                    action_meaning = ACTION_MEANINGS[unit_type][action_idx]
-                    # Convert the action index to an actual string command for the game engine.
-                    action = get_unit_action(unit, action_idx, pos_to_unit_dict)
-
-                    # Mark the action as taken only if it is valid (or if it is NO-OP).
-                    action_was_taken = (action_meaning == "NO-OP") or (action is not None and action != "")
-                    actions_taken[unit_type][0, p_id, x, y, action_idx] = action_was_taken
-
-                    # If NO-OP was chosen, we skip further units on the same cell by adding MAX_OVERLAPPING_ACTIONS
-                    # to the actor_count. This effectively ensures the rest of the units on this cell do NO-OP as well.
-                    if action_meaning == "NO-OP":
-                        actions_taken_count[x, y] += MAX_OVERLAPPING_ACTIONS
+                    if actor_count >= MAX_OVERLAPPING_ACTIONS:
+                        action = None
+                    else:
+                        action_idx = action_tensors_dict[unit_type][0, p_id, x, y, actor_count]
+                        action_meaning = ACTION_MEANINGS[unit_type][action_idx]
+                        action = get_unit_action(unit, action_idx, pos_to_unit_dict)
+                        action_was_taken = action_meaning == "NO-OP" or (action is not None and action != "")
+                        actions_taken[unit_type][0, p_id, x, y, action_idx] = action_was_taken
+                        # If action is NO-OP, skip remaining actions for units at same location
+                        if action_meaning == "NO-OP":
+                            actions_taken_count[x, y] += MAX_OVERLAPPING_ACTIONS
 
                     # None means no-op; "" means an invalid action (treated as no-op by the engine).
                     # If the action is valid, add it to the player's action queue.
                     if action is not None and action != "":
-                        action_strs[p_id].append(action)
+                        action_arrays[p_id].append(action)
 
                     # Regardless of whether the action was valid, we increment the overlap counter.
                     actions_taken_count[x, y] += 1
 
-            # Process city tiles
-            for city in player.cities.values():
-                for city_tile in city.citytiles:
-                    if city_tile.can_act():
-                        x, y = city_tile.pos.x, city_tile.pos.y
-                        # Here we don't use overlapping logic; city tiles do not have the same limit as units.
-                        action_idx = action_tensors_dict["city_tile"][0, p_id, x, y, 0]
-                        action_meaning = ACTION_MEANINGS["city_tile"][action_idx]
-                        action = get_city_tile_action(city_tile, action_idx)
-
-                        # Mark the action as taken if valid.
-                        action_was_taken = (action_meaning == "NO-OP") or (action is not None and action != "")
-                        actions_taken["city_tile"][0, p_id, x, y, action_idx] = action_was_taken
-
-                        # None means no-op, but if not None, we add it to the commands.
-                        if action is not None:
-                            action_strs[p_id].append(action)
-
-        return action_strs, actions_taken
+        return action_arrays, actions_taken
 
     def get_available_actions_mask(
             self,
             game_state: Game,
             board_dims: Tuple[int, int],
             pos_to_unit_dict: Dict[Tuple, Optional[Unit]],
-            pos_to_city_tile_dict: Dict[Tuple, Optional[CityTile]]
     ) -> Dict[str, np.ndarray]:
         """
         Compute a boolean mask that indicates which actions are valid for each cell, for each player, for each
@@ -325,134 +299,28 @@ class BasicActionSpace(BaseActSpace):
 
             # Check each unit
             for unit in player.units:
-                if unit.can_act():
-                    x, y = unit.pos.x, unit.pos.y
-                    if unit.is_worker():
-                        unit_type = "worker"
-                    elif unit.is_cart():
-                        unit_type = "cart"
-                    else:
-                        raise NotImplementedError(f"New unit type: {unit}")
+                x, y = unit.pos.x, unit.pos.y
+                unit_type = "unit"
 
-                    # For each direction, see if movement/transfer is feasible.
-                    for direction in DIRECTIONS:
-                        new_pos_tuple = unit.pos.translate(direction, 1)
-                        new_pos_tuple = (new_pos_tuple.x, new_pos_tuple.y)
+                # For each direction, see if movement/transfer is feasible.
+                for direction in DIRECTIONS:
+                    new_pos_tuple = unit.pos.translate(direction, 1)
+                    new_pos_tuple = (new_pos_tuple.x, new_pos_tuple.y)
 
-                        # If new_pos_tuple is off the board or invalid, disable move and transfer.
-                        if new_pos_tuple not in pos_to_unit_dict.keys():
-                            available_actions_mask[unit_type][
-                            :,
-                            p_id,
-                            x,
-                            y,
-                            ACTION_MEANINGS_TO_IDX[unit_type][f"MOVE_{direction}"]
-                            ] = False
-                            for resource in RESOURCES:
-                                available_actions_mask[unit_type][
-                                :,
-                                p_id,
-                                x,
-                                y,
-                                ACTION_MEANINGS_TO_IDX[unit_type][f"TRANSFER_{resource}_{direction}"]
-                                ] = False
-                            continue
+                    # If new_pos_tuple is off the board or invalid, disable move and transfer.
+                    if new_pos_tuple not in pos_to_unit_dict.keys():
+                        available_actions_mask[unit_type][
+                        :,
+                        p_id,
+                        x,
+                        y,
+                        ACTION_MEANINGS_TO_IDX[unit_type][f"MOVE_{direction}"]
+                        ] = False
+                        continue
 
-                        # If the new position is an enemy city tile, can't move onto it.
-                        new_pos_city_tile = pos_to_city_tile_dict[new_pos_tuple]
-                        if new_pos_city_tile and new_pos_city_tile.team != p_id:
-                            available_actions_mask[unit_type][
-                            :,
-                            p_id,
-                            x,
-                            y,
-                            ACTION_MEANINGS_TO_IDX[unit_type][f"MOVE_{direction}"]
-                            ] = False
-
-                        # If the new position has a unit whose cooldown > 0, can't move onto it.
-                        new_pos_unit = pos_to_unit_dict[new_pos_tuple]
-                        if new_pos_unit and new_pos_unit.cooldown > 0:
-                            available_actions_mask[unit_type][
-                            :,
-                            p_id,
-                            x,
-                            y,
-                            ACTION_MEANINGS_TO_IDX[unit_type][f"MOVE_{direction}"]
-                            ] = False
-
-                        # Transfer checks
-                        for resource in RESOURCES:
-                            # For transfer to be valid:
-                            # 1) There's an allied unit in target square.
-                            # 2) The transferring unit has that resource in its cargo.
-                            # 3) The receiving unit has cargo space available.
-                            if (
-                                    (new_pos_unit is None or new_pos_unit.team != p_id) or
-                                    (unit.cargo.get(resource) <= 0) or
-                                    (new_pos_unit.get_cargo_space_left() <= 0)
-                            ):
-                                available_actions_mask[unit_type][
-                                :,
-                                p_id,
-                                x,
-                                y,
-                                ACTION_MEANINGS_TO_IDX[unit_type][f"TRANSFER_{resource}_{direction}"]
-                                ] = False
-
-                    # Worker-only actions
-                    if unit.is_worker():
-                        # PILLAGE: only valid if on a road tile and not on your own city tile.
-                        if game_state.map.get_cell_by_pos(unit.pos).road <= 0 or \
-                                pos_to_city_tile_dict[(unit.pos.x, unit.pos.y)] is not None:
-                            available_actions_mask[unit_type][
-                            :,
-                            p_id,
-                            x,
-                            y,
-                            ACTION_MEANINGS_TO_IDX[unit_type]["PILLAGE"]
-                            ] = False
-
-                        # BUILD_CITY: only valid if the worker has enough resources and is not on a resource tile.
-                        if not unit.can_build(game_state.map):
-                            available_actions_mask[unit_type][
-                            :,
-                            p_id,
-                            x,
-                            y,
-                            ACTION_MEANINGS_TO_IDX[unit_type]["BUILD_CITY"]
-                            ] = False
-
-            # Check each city tile
-            for city in player.cities.values():
-                for city_tile in city.citytiles:
-                    if city_tile.can_act():
-                        x, y = city_tile.pos.x, city_tile.pos.y
-                        # RESEARCH is valid if player.research_points < MAX_RESEARCH
-                        if player.research_points >= MAX_RESEARCH:
-                            available_actions_mask["city_tile"][
-                            :,
-                            p_id,
-                            x,
-                            y,
-                            ACTION_MEANINGS_TO_IDX["city_tile"]["RESEARCH"]
-                            ] = False
-                        # BUILD_WORKER or BUILD_CART is only valid if the total number of units < city_tile_count
-                        if len(player.units) >= player.city_tile_count:
-                            available_actions_mask["city_tile"][
-                            :,
-                            p_id,
-                            x,
-                            y,
-                            ACTION_MEANINGS_TO_IDX["city_tile"]["BUILD_WORKER"]
-                            ] = False
-                            available_actions_mask["city_tile"][
-                            :,
-                            p_id,
-                            x,
-                            y,
-                            ACTION_MEANINGS_TO_IDX["city_tile"]["BUILD_CART"]
-                            ] = False
-
+        #         TODO: This is where I'll filter mask invalid sap actions also. As a starting point, we could just have onee 32*32 output of saps,
+        #           and mask all squares where we don't have a unit in range. And if we output a valid sap pixel (maybe just one per turn at first,
+        #           the most high-energy unit in range attacks it?
 
         return available_actions_mask
 
